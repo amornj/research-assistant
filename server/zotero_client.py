@@ -1,6 +1,5 @@
-"""Zotero client — talks to Better BibTeX JSON-RPC API."""
+"""Zotero client — talks to Zotero Web API v3."""
 
-import json
 import logging
 
 import httpx
@@ -10,58 +9,69 @@ from . import config
 log = logging.getLogger(__name__)
 
 _client: httpx.AsyncClient | None = None
-_rpc_id = 0
 
 
 def _get_client() -> httpx.AsyncClient:
     global _client
     if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(timeout=30.0)
+        _client = httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "Zotero-API-Key": config.ZOTERO_API_KEY,
+                "Zotero-API-Version": "3",
+            },
+        )
     return _client
 
 
-async def _rpc(method: str, params: list | None = None) -> dict:
-    global _rpc_id
-    _rpc_id += 1
-    payload = {
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params or [],
-        "id": _rpc_id,
-    }
-    client = _get_client()
-    resp = await client.post(config.BBT_URL, json=payload)
-    resp.raise_for_status()
-    data = resp.json()
-    if "error" in data:
-        raise RuntimeError(f"BBT RPC error: {data['error']}")
-    return data.get("result")
-
-
 async def search_items(query: str) -> list[dict]:
-    """Search Zotero items via BBT. Returns CSL-JSON-ish dicts."""
-    result = await _rpc("item.search", [query])
-    if isinstance(result, str):
+    """Search Zotero items via Web API. Returns list of item data dicts."""
+    client = _get_client()
+    resp = await client.get(
+        f"{config.ZOTERO_BASE_URL}/items",
+        params={"q": query, "format": "json", "limit": 25, "itemType": "-attachment"},
+    )
+    resp.raise_for_status()
+    items = resp.json()
+    # Normalise to a simpler format the frontend expects
+    results = []
+    for item in items:
+        data = item.get("data", item)
+        results.append({
+            "key": data.get("key", ""),
+            "title": data.get("title", ""),
+            "creators": data.get("creators", []),
+            "date": data.get("date", ""),
+            "itemType": data.get("itemType", ""),
+            "abstractNote": data.get("abstractNote", ""),
+            "DOI": data.get("DOI", ""),
+            "url": data.get("url", ""),
+        })
+    return results
+
+
+async def export_items(citekeys: list[str]) -> list[dict]:
+    """Export items by key as CSL-JSON via Web API.
+
+    Note: Zotero Web API uses item keys, not BBT citekeys.
+    The frontend sends item keys from search results.
+    """
+    client = _get_client()
+    if not citekeys:
+        return []
+    # Fetch each item individually (Web API doesn't support batch by arbitrary keys easily)
+    results = []
+    for key in citekeys:
         try:
-            return json.loads(result)
-        except json.JSONDecodeError:
-            return []
-    return result if isinstance(result, list) else []
-
-
-async def export_items(citekeys: list[str], translator: str = "json") -> list[dict]:
-    """Export items by citekey as CSL-JSON."""
-    result = await _rpc("item.export", [citekeys, translator])
-    if isinstance(result, str):
-        try:
-            return json.loads(result)
-        except json.JSONDecodeError:
-            return []
-    return result if isinstance(result, list) else []
-
-
-async def get_citation_keys(item_keys: list[str]) -> dict:
-    return await _rpc("item.citationkey", [item_keys])
+            resp = await client.get(
+                f"{config.ZOTERO_BASE_URL}/items/{key}",
+                params={"format": "csljson"},
+            )
+            resp.raise_for_status()
+            results.append(resp.json())
+        except Exception as exc:
+            log.warning("Failed to export item %s: %s", key, exc)
+    return results
 
 
 async def close():

@@ -14,10 +14,7 @@ logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        await mcp_client.start()
-    except Exception as e:
-        logging.warning("MCP client failed to start (NotebookLM features unavailable): %s", e)
+    await mcp_client.start()
     yield
     await mcp_client.stop()
     await zotero_client.close()
@@ -41,7 +38,7 @@ app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 
 def main():
-    uvicorn.run("server.app:app", host="127.0.0.1", port=8080, reload=True)
+    uvicorn.run("server.app:app", host="127.0.0.1", port=8081, reload=True)
 
 
 if __name__ == "__main__":

@@ -8,13 +8,15 @@
 ## Running
 ```bash
 cd /Users/home/projects/research-assistant
-uv run uvicorn server.app:app --host 127.0.0.1 --port 8080 --reload
+uv run uvicorn server.app:app --host 127.0.0.1 --port 8081 --reload
 ```
-Open http://localhost:8080
+Open http://localhost:8081
+
+Requires `.env` with: `NLM_PROXY_URL`, `NLM_PROXY_KEY`, `NLM_CLI_PATH`, `ZOTERO_API_KEY`, `ZOTERO_USER_ID`
 
 ## Key integrations
-- **NotebookLM**: via `notebooklm-mcp` CLI subprocess (MCP stdio transport). Client in `server/mcp_client.py`
-- **Zotero**: via Better BibTeX JSON-RPC at `localhost:23119`. Client in `server/zotero_client.py`
+- **NotebookLM**: queries via Tailscale HTTP proxy (`NLM_PROXY_URL/query`), listing via `nlm` CLI. Client in `server/mcp_client.py`
+- **Zotero**: via Zotero Web API v3 (`api.zotero.org`). Client in `server/zotero_client.py`
 - **Export**: pandoc subprocess for DOCX/PDF. Handler in `server/export.py`
 
 ## File layout
@@ -22,8 +24,8 @@ Open http://localhost:8080
 server/
   app.py          — FastAPI app, lifespan, static mount
   config.py       — paths, URLs
-  mcp_client.py   — NotebookLM MCP stdio client
-  zotero_client.py — BBT JSON-RPC client
+  mcp_client.py   — NotebookLM HTTP proxy + CLI client
+  zotero_client.py — Zotero Web API v3 client
   export.py       — pandoc HTML->DOCX/PDF
   routes/
     projects.py   — CRUD for projects
@@ -44,5 +46,6 @@ static/
 ## Conventions
 - No build tooling — frontend loads deps from CDN
 - Projects stored as `data/projects/{id}.json`
-- MCP client auto-reconnects on failure
-- Zotero collection lookup uses BBT `item.search` (no collection list API in BBT)
+- Config via `.env` file loaded by python-dotenv
+- NLM queries go through Tailscale proxy; notebook/source listing via local `nlm` CLI
+- Zotero search uses Web API `/items?q=` endpoint; export fetches CSL-JSON per item key
