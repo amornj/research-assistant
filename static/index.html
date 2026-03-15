@@ -26,7 +26,7 @@
   <!-- Main layout -->
   <div class="main">
     <!-- Left: Notebook Chat -->
-    <div class="pane-notebook">
+    <div class="pane-notebook" id="pane-notebook">
       <div class="header">NotebookLM</div>
       <div class="chat-messages" id="chat-messages">
         <div class="status-msg">Create or select a project to start querying</div>
@@ -37,7 +37,10 @@
       </div>
     </div>
 
-    <!-- Right: Editor + References -->
+    <!-- Draggable divider -->
+    <div class="pane-divider" id="pane-divider"></div>
+
+    <!-- Right: Editor + Tabbed bottom -->
     <div class="pane-right">
       <!-- Editor -->
       <div class="pane-editor">
@@ -59,17 +62,44 @@
         </div>
       </div>
 
-      <!-- References -->
-      <div class="pane-references">
-        <div class="header">
-          <span>References</span>
-          <input id="ref-filter" type="text" placeholder="Filter references...">
+      <!-- Tabbed bottom pane -->
+      <div class="pane-bottom">
+        <div class="tab-bar">
+          <button class="tab-btn active" data-tab="ai-writing">AI Writing</button>
+          <button class="tab-btn" data-tab="zotero">Zotero</button>
         </div>
-        <div class="ref-list" id="ref-list">
-          <div class="status-msg">No references loaded</div>
+        <div class="tab-content" id="tab-ai-writing">
+          <div class="ai-writing-controls">
+            <label>Model</label>
+            <select id="ai-model-select">
+              <option value="claude-opus-4-6">Claude Opus 4.6</option>
+              <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+              <option value="gpt-5.4">GPT-5.4</option>
+            </select>
+          </div>
+          <div class="ai-writing-hint">
+            <p>Right-click selected text in the editor to rewrite with AI.</p>
+          </div>
+          <div class="ai-writing-log" id="ai-writing-log"></div>
+        </div>
+        <div class="tab-content hidden" id="tab-zotero">
+          <div class="zotero-header">
+            <span>References</span>
+            <input id="ref-filter" type="text" placeholder="Filter references...">
+          </div>
+          <div class="ref-list" id="ref-list">
+            <div class="status-msg">No references loaded</div>
+          </div>
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Context menu for AI rewrite -->
+  <div class="context-menu hidden" id="ai-context-menu">
+    <div class="context-menu-header">AI Rewrite</div>
+    <input id="ai-rewrite-instruction" type="text" placeholder="Describe style change...">
+    <button id="ai-rewrite-go">Rewrite</button>
   </div>
 
   <script type="module" src="/js/app.js"></script>

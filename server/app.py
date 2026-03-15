@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import mcp_client, zotero_client
-from .routes import export, notebooks, projects, zotero
+from .routes import ai, export, notebooks, projects, zotero
 
 logging.basicConfig(level=logging.INFO)
 
@@ -33,6 +33,7 @@ app.include_router(projects.router)
 app.include_router(notebooks.router)
 app.include_router(zotero.router)
 app.include_router(export.router)
+app.include_router(ai.router)
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 

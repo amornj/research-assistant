@@ -55,8 +55,8 @@ function appendMsg(content, role, showInsert = false) {
 
   if (showInsert && onInsertToEditor) {
     const btn = document.createElement('span');
-    btn.className = 'insert-btn';
-    btn.textContent = '+ Insert into document';
+    btn.className = 'push-to-writer';
+    btn.textContent = '⬆ Push to Writer';
     btn.addEventListener('click', () => onInsertToEditor(content));
     div.appendChild(btn);
   }

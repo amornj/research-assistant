@@ -2,6 +2,7 @@ import { get, post, put, downloadPost } from './api.js';
 import * as editor from './editor-pane.js';
 import * as notebook from './notebook-pane.js';
 import * as refs from './references-pane.js';
+import * as aiWriting from './ai-writing-pane.js';
 
 let currentProject = null;
 let autoSaveTimer = null;
@@ -23,6 +24,15 @@ async function boot() {
   // Init references pane
   refs.init((citation) => editor.insertCitation(citation));
 
+  // Init AI writing pane
+  aiWriting.init(() => editor.getEditor());
+
+  // Init pane divider
+  initDivider();
+
+  // Init tabs
+  initTabs();
+
   // Load project list
   await refreshProjects();
 
@@ -34,6 +44,49 @@ async function boot() {
 
   // Auto-save every 30s
   autoSaveTimer = setInterval(autoSave, 30000);
+}
+
+function initDivider() {
+  const divider = document.getElementById('pane-divider');
+  const main = document.querySelector('.main');
+  const paneNotebook = document.getElementById('pane-notebook');
+  let dragging = false;
+
+  divider.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    dragging = true;
+    divider.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const mainRect = main.getBoundingClientRect();
+    let newWidth = e.clientX - mainRect.left;
+    newWidth = Math.max(240, Math.min(newWidth, mainRect.width - 400));
+    main.style.gridTemplateColumns = `${newWidth}px 4px 1fr`;
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    divider.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+}
+
+function initTabs() {
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.tab-content').forEach(tc => tc.classList.add('hidden'));
+      document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
+    });
+  });
 }
 
 async function refreshProjects() {
