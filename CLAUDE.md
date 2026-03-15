@@ -1,41 +1,48 @@
-# CLAUDE.md
+# Research Assistant
 
-## Project
-`research-assistant` is a webapp that blends:
-- NotebookLM-style grounded question answering
-- AI-assisted long-form writing
-- Zotero-backed references
+## Architecture
+- **Backend**: Python FastAPI (`server/`) — proxies MCP and Zotero calls, handles export
+- **Frontend**: Vanilla JS SPA (`static/`) — TipTap editor loaded from esm.sh CDN, no build step
+- **Storage**: JSON files on disk (`data/projects/`) — one file per project, no database
 
-## Core UX
-- **Project setup** asks for NotebookLM notebook name and Zotero collection name
-- **Left pane** is NotebookLM-style ask/generate
-- **Right pane** is an editable block-based writing surface
-- **Bottom-right pane** shows Zotero references for the selected collection
-- References attach to writing blocks so they move with the content when blocks are reordered
+## Running
+```bash
+cd /Users/home/projects/research-assistant
+uv run uvicorn server.app:app --host 127.0.0.1 --port 8080 --reload
+```
+Open http://localhost:8080
 
-## Key architectural choice
-The writing pane uses **block-level anchoring** rather than raw inline text references. This keeps manual references attached to the content block when paragraphs move.
+## Key integrations
+- **NotebookLM**: via `notebooklm-mcp` CLI subprocess (MCP stdio transport). Client in `server/mcp_client.py`
+- **Zotero**: via Better BibTeX JSON-RPC at `localhost:23119`. Client in `server/zotero_client.py`
+- **Export**: pandoc subprocess for DOCX/PDF. Handler in `server/export.py`
 
-## API routes
-- `/api/notebooks` — list available NotebookLM notebooks via local CLI if configured
-- `/api/notebooklm` — query NotebookLM proxy
-- `/api/zotero/collection` — resolve/create Zotero collection by name
-- `/api/zotero/items` — fetch Zotero collection items for reference pane
+## File layout
+```
+server/
+  app.py          — FastAPI app, lifespan, static mount
+  config.py       — paths, URLs
+  mcp_client.py   — NotebookLM MCP stdio client
+  zotero_client.py — BBT JSON-RPC client
+  export.py       — pandoc HTML->DOCX/PDF
+  routes/
+    projects.py   — CRUD for projects
+    notebooks.py  — proxy NotebookLM queries
+    zotero.py     — proxy Zotero search/export
+    export.py     — download endpoints
+static/
+  index.html      — SPA shell, 3-pane layout
+  css/style.css   — dark theme, CSS grid layout
+  js/
+    app.js        — boot, project management, export
+    editor-pane.js — TipTap editor + citation node
+    notebook-pane.js — chat interface for NotebookLM
+    references-pane.js — Zotero references list + insert
+    api.js        — fetch wrapper
+```
 
-## Export
-- DOCX via `docx`
-- PDF via `jspdf`
-
-## Required env for full functionality
-- `NLM_PROXY_URL`
-- `NLM_PROXY_KEY`
-- `NLM_CLI_PATH` (optional; for local notebook listing)
-- `ZOTERO_API_KEY`
-- `ZOTERO_USER_ID`
-- optional `ZOTERO_API_BASE`
-
-## MVP caveats
-- Notebook listing by name depends on local `nlm` CLI availability
-- Right-pane writing is block-based, not yet a full rich-text editor
-- Reference insertion is manual click-to-attach; journal-style inline citation formatting is not fully automated yet
-- PDF export is client-side layout, not a print-perfect journal formatter
+## Conventions
+- No build tooling — frontend loads deps from CDN
+- Projects stored as `data/projects/{id}.json`
+- MCP client auto-reconnects on failure
+- Zotero collection lookup uses BBT `item.search` (no collection list API in BBT)

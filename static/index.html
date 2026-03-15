@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Research Assistant</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Top Bar -->
+  <div class="topbar">
+    <h1>Research Assistant</h1>
+    <select id="project-select">
+      <option value="">Select project...</option>
+    </select>
+    <button id="btn-new-project">+ New Project</button>
+    <span class="spacer"></span>
+    <span id="project-name" style="font-size:13px;color:var(--text-dim)"></span>
+    <span class="spacer"></span>
+    <button id="btn-export-docx">Export DOCX</button>
+    <button id="btn-export-pdf">Export PDF</button>
+  </div>
+
+  <!-- Main layout -->
+  <div class="main">
+    <!-- Left: Notebook Chat -->
+    <div class="pane-notebook">
+      <div class="header">NotebookLM</div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="status-msg">Create or select a project to start querying</div>
+      </div>
+      <div class="chat-input-row">
+        <input id="chat-input" type="text" placeholder="Ask your notebook...">
+        <button id="chat-send">Send</button>
+      </div>
+    </div>
+
+    <!-- Right: Editor + References -->
+    <div class="pane-right">
+      <!-- Editor -->
+      <div class="pane-editor">
+        <div class="editor-toolbar">
+          <button id="btn-bold"><b>B</b></button>
+          <button id="btn-italic"><i>I</i></button>
+          <button id="btn-underline"><u>U</u></button>
+          <div class="sep"></div>
+          <button id="btn-h1">H1</button>
+          <button id="btn-h2">H2</button>
+          <button id="btn-h3">H3</button>
+          <div class="sep"></div>
+          <button id="btn-ul">&#8226; List</button>
+          <button id="btn-ol">1. List</button>
+          <button id="btn-quote">&ldquo; Quote</button>
+        </div>
+        <div class="editor-content">
+          <div id="editor-mount"></div>
+        </div>
+      </div>
+
+      <!-- References -->
+      <div class="pane-references">
+        <div class="header">
+          <span>References</span>
+          <input id="ref-filter" type="text" placeholder="Filter references...">
+        </div>
+        <div class="ref-list" id="ref-list">
+          <div class="status-msg">No references loaded</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
