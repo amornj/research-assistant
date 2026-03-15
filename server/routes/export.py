@@ -30,3 +30,13 @@ async def export_pdf(body: ExportRequest):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{body.filename}.pdf"'},
     )
+
+
+@router.post("/md")
+async def export_md(body: ExportRequest):
+    data = await exporter.to_markdown(body.html)
+    return Response(
+        content=data,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{body.filename}.md"'},
+    )

@@ -19,6 +19,8 @@ class ProjectCreate(BaseModel):
 
 class DocumentSave(BaseModel):
     html: str
+    chat_history: list = []
+    conversation_id: str | None = None
 
 
 def _project_path(pid: str) -> Path:
@@ -90,5 +92,7 @@ async def get_project(pid: str):
 async def save_document(pid: str, body: DocumentSave):
     project = _load(pid)
     project["document_html"] = body.html
+    project["chat_history"] = body.chat_history
+    project["conversation_id"] = body.conversation_id
     _save(pid, project)
     return {"ok": True}

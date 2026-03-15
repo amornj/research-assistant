@@ -25,6 +25,30 @@ export function setNotebook(id) {
   }
 }
 
+export function getHistory() {
+  const history = [];
+  messagesEl.querySelectorAll('.chat-msg').forEach(msg => {
+    history.push({
+      role: msg.classList.contains('user') ? 'user' : 'assistant',
+      content: msg.innerHTML,
+      showInsert: !!msg.querySelector('.push-to-writer')
+    });
+  });
+  return history;
+}
+
+export function setHistory(history, convId) {
+  messagesEl.innerHTML = '';
+  conversationId = convId;
+  if (!history || history.length === 0) {
+    messagesEl.innerHTML = '<div class="status-msg">No messages yet</div>';
+    return;
+  }
+  history.forEach(m => appendMsg(m.content, m.role, m.showInsert));
+}
+
+export function getConversationId() { return conversationId; }
+
 async function send() {
   const query = inputEl.value.trim();
   if (!query || !notebookId) return;
@@ -56,7 +80,8 @@ function appendMsg(content, role, showInsert = false) {
   if (showInsert && onInsertToEditor) {
     const btn = document.createElement('span');
     btn.className = 'push-to-writer';
-    btn.textContent = '⬆ Push to Writer';
+    btn.textContent = '»';
+    btn.title = 'Push to Writer';
     btn.addEventListener('click', () => onInsertToEditor(content));
     div.appendChild(btn);
   }

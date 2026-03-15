@@ -19,8 +19,14 @@
     <span class="spacer"></span>
     <span id="project-name" style="font-size:13px;color:var(--text-dim)"></span>
     <span class="spacer"></span>
-    <button id="btn-export-docx">Export DOCX</button>
-    <button id="btn-export-pdf">Export PDF</button>
+    <div class="export-dropdown">
+      <button id="btn-export-main">Export ▾</button>
+      <div id="export-options" class="export-options hidden">
+        <button data-format="docx">DOCX</button>
+        <button data-format="pdf">PDF</button>
+        <button data-format="md">Markdown</button>
+      </div>
+    </div>
   </div>
 
   <!-- Main layout -->
@@ -62,6 +68,8 @@
         </div>
       </div>
 
+      <div class="pane-divider-h" id="pane-divider-h"></div>
+
       <!-- Tabbed bottom pane -->
       <div class="pane-bottom">
         <div class="tab-bar">
@@ -72,15 +80,19 @@
           <div class="ai-writing-controls">
             <label>Model</label>
             <select id="ai-model-select">
-              <option value="claude-opus-4-6">Claude Opus 4.6</option>
-              <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-              <option value="gpt-5.4">GPT-5.4</option>
+              <option value="minimax-2.5">MiniMax 2.5</option>
             </select>
+            <button id="ai-oauth-btn" class="ai-oauth-btn">Connect</button>
+            <span id="ai-oauth-status" class="ai-oauth-status hidden">✓ Connected</span>
           </div>
           <div class="ai-writing-hint">
             <p>Right-click selected text in the editor to rewrite with AI.</p>
           </div>
           <div class="ai-writing-log" id="ai-writing-log"></div>
+          <div class="ai-chat-input-row">
+            <input id="ai-chat-input" type="text" placeholder="Ask AI to edit document...">
+            <button id="ai-chat-send">Send</button>
+          </div>
         </div>
         <div class="tab-content hidden" id="tab-zotero">
           <div class="zotero-header">
