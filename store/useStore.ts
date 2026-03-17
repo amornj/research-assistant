@@ -1,0 +1,270 @@
+import { create } from 'zustand';
+import { Project, Block, ChatMessage } from '@/types';
+
+function generateId(): string {
+  return Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+}
+
+function createBlock(html: string = '', type: string = 'paragraph'): Block {
+  return {
+    id: generateId(),
+    type,
+    versions: [{ html, ts: Date.now(), instruction: null }],
+    activeVersion: 0,
+  };
+}
+
+const STORAGE_KEY = 'research_assistant_projects';
+
+interface Store {
+  projects: Project[];
+  currentProjectId: string | null;
+  currentProject: Project | null;
+  // Actions
+  loadProjects: () => void;
+  createProject: (data: Partial<Project>) => Project;
+  selectProject: (id: string) => void;
+  updateProjectField: (field: keyof Project, value: any) => void;
+  saveCurrentProject: () => void;
+  // Block actions
+  setBlocks: (blocks: Block[]) => void;
+  addBlock: (html: string, afterId?: string) => Block;
+  updateBlock: (id: string, html: string) => void;
+  deleteBlock: (id: string) => void;
+  moveBlock: (fromId: string, toId: string, position: 'before' | 'after') => void;
+  addBlockVersion: (id: string, html: string, instruction: string) => void;
+  switchBlockVersion: (id: string, versionIndex: number) => void;
+  // Chat
+  setChatHistory: (history: ChatMessage[]) => void;
+  addChatMessage: (msg: ChatMessage) => void;
+  setConversationId: (id: string | null) => void;
+}
+
+function saveToStorage(projects: Project[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+  } catch (e) {
+    console.error('Failed to save projects:', e);
+  }
+}
+
+export const useStore = create<Store>((set, get) => ({
+  projects: [],
+  currentProjectId: null,
+  currentProject: null,
+
+  loadProjects: () => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const projects: Project[] = raw ? JSON.parse(raw) : [];
+      const currentProjectId = projects.length > 0 ? projects[0].id : null;
+      set({
+        projects,
+        currentProjectId,
+        currentProject: currentProjectId ? projects.find(p => p.id === currentProjectId) || null : null,
+      });
+    } catch (e) {
+      set({ projects: [], currentProjectId: null, currentProject: null });
+    }
+  },
+
+  createProject: (data) => {
+    const project: Project = {
+      id: generateId(),
+      name: data.name || 'Untitled Project',
+      notebookName: data.notebookName || '',
+      notebookId: data.notebookId || null,
+      zoteroCollection: data.zoteroCollection || '',
+      blocks: [createBlock('')],
+      chatHistory: [],
+      conversationId: null,
+      createdAt: new Date().toISOString(),
+    };
+    const projects = [...get().projects, project];
+    saveToStorage(projects);
+    set({ projects, currentProjectId: project.id, currentProject: project });
+    return project;
+  },
+
+  selectProject: (id) => {
+    const { projects } = get();
+    const project = projects.find(p => p.id === id) || null;
+    set({ currentProjectId: id, currentProject: project });
+  },
+
+  updateProjectField: (field, value) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p =>
+      p.id === currentProjectId ? { ...p, [field]: value } : p
+    );
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  saveCurrentProject: () => {
+    const { projects } = get();
+    saveToStorage(projects);
+  },
+
+  setBlocks: (blocks) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p =>
+      p.id === currentProjectId ? { ...p, blocks } : p
+    );
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  addBlock: (html = '', afterId) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) {
+      const block = createBlock(html);
+      return block;
+    }
+    const project = projects.find(p => p.id === currentProjectId);
+    if (!project) {
+      const block = createBlock(html);
+      return block;
+    }
+    const block = createBlock(html);
+    let blocks: Block[];
+    if (afterId) {
+      const idx = project.blocks.findIndex(b => b.id === afterId);
+      blocks = [...project.blocks];
+      blocks.splice(idx + 1, 0, block);
+    } else {
+      blocks = [...project.blocks, block];
+    }
+    const updated = projects.map(p =>
+      p.id === currentProjectId ? { ...p, blocks } : p
+    );
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+    return block;
+  },
+
+  updateBlock: (id, html) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.map(b => {
+        if (b.id !== id) return b;
+        const versions = [...b.versions];
+        versions[b.activeVersion] = { ...versions[b.activeVersion], html };
+        return { ...b, versions };
+      });
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  deleteBlock: (id) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.filter(b => b.id !== id);
+      return { ...p, blocks: blocks.length > 0 ? blocks : [createBlock('')] };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  moveBlock: (fromId, toId, position) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = [...p.blocks];
+      const fromIdx = blocks.findIndex(b => b.id === fromId);
+      const toIdx = blocks.findIndex(b => b.id === toId);
+      if (fromIdx === -1 || toIdx === -1) return p;
+      const [moved] = blocks.splice(fromIdx, 1);
+      const newToIdx = blocks.findIndex(b => b.id === toId);
+      const insertIdx = position === 'after' ? newToIdx + 1 : newToIdx;
+      blocks.splice(insertIdx, 0, moved);
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  addBlockVersion: (id, html, instruction) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.map(b => {
+        if (b.id !== id) return b;
+        const newVersion = { html, ts: Date.now(), instruction };
+        const versions = [...b.versions, newVersion].slice(-5); // keep last 5
+        return { ...b, versions, activeVersion: versions.length - 1 };
+      });
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  switchBlockVersion: (id, versionIndex) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.map(b => {
+        if (b.id !== id) return b;
+        return { ...b, activeVersion: versionIndex };
+      });
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  setChatHistory: (history) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p =>
+      p.id === currentProjectId ? { ...p, chatHistory: history } : p
+    );
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  addChatMessage: (msg) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p =>
+      p.id === currentProjectId
+        ? { ...p, chatHistory: [...p.chatHistory, msg] }
+        : p
+    );
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  setConversationId: (id) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p =>
+      p.id === currentProjectId ? { ...p, conversationId: id } : p
+    );
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+}));

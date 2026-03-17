@@ -1,53 +1,88 @@
 # Research Assistant
 
 ## Architecture
-- **Backend**: Python FastAPI (`server/`) — proxies MCP and Zotero calls, handles export
-- **Frontend**: Vanilla JS SPA (`static/`) — TipTap editor loaded from esm.sh CDN, no build step
-- **Storage**: JSON files on disk (`data/projects/`) — one file per project, no database
+- **Framework**: Next.js 16 (App Router) + React 19 + TypeScript
+- **Styling**: Tailwind CSS v4 (dark theme)
+- **State**: Zustand — projects stored in browser `localStorage`
+- **AI**: Anthropic SDK (`@anthropic-ai/sdk`) — Claude Sonnet via `/api/ai/*` routes
+- **No database, no build step dependencies** — pure Next.js, deployable to Vercel
 
 ## Running
 ```bash
 cd /Users/home/projects/research-assistant
-uv run uvicorn server.app:app --host 127.0.0.1 --port 8081 --reload
+npm run dev
 ```
-Open http://localhost:8081
+Open http://localhost:3000
 
-Requires `.env` with: `NLM_PROXY_URL`, `NLM_PROXY_KEY`, `NLM_CLI_PATH`, `ZOTERO_API_KEY`, `ZOTERO_USER_ID`
+Requires `.env` with:
+```
+NLM_PROXY_URL=https://homes-imac.tail459031.ts.net
+NLM_PROXY_KEY=cto-coach-2026
+ZOTERO_API_KEY=BIkDlKKe6aVYG0ncz4YVbEEI
+ZOTERO_USER_ID=7734498
+ANTHROPIC_API_KEY=<your key>
+```
 
 ## Key integrations
-- **NotebookLM**: queries via Tailscale HTTP proxy (`NLM_PROXY_URL/query`), listing via `nlm` CLI. Client in `server/mcp_client.py`
-- **Zotero**: via Zotero Web API v3 (`api.zotero.org`). Client in `server/zotero_client.py`
-- **Export**: pandoc subprocess for DOCX/PDF. Handler in `server/export.py`
-- **MiniMax via OpenClaw**: uses OpenClaw Gateway as OAuth proxy. Client in `server/openclaw_client.py`
-- **MiniMax Direct**: uses OAuth 2.0 directly. Client integrated in `server/routes/ai.py`
+- **NotebookLM**: proxied via `/api/notebooks/query` and `/api/notebooks/list` → Tailscale HTTP proxy
+- **Zotero**: proxied via `/api/zotero/search` → api.zotero.org
+- **AI Rewrite**: `/api/ai/rewrite` → Anthropic (per-block rewrite)
+- **AI Chat**: `/api/ai/chat` (doc-aware) and `/api/ai/general` → Anthropic
 
 ## File layout
 ```
-server/
-  app.py          — FastAPI app, lifespan, static mount
-  config.py       — paths, URLs
-  mcp_client.py   — NotebookLM HTTP proxy + CLI client
-  zotero_client.py — Zotero Web API v3 client
-  export.py       — pandoc HTML->DOCX/PDF
-  routes/
-    projects.py   — CRUD for projects
-    notebooks.py  — proxy NotebookLM queries
-    zotero.py     — proxy Zotero search/export
-    export.py     — download endpoints
-static/
-  index.html      — SPA shell, 3-pane layout
-  css/style.css   — dark theme, CSS grid layout
-  js/
-    app.js        — boot, project management, export
-    editor-pane.js — TipTap editor + citation node
-    notebook-pane.js — chat interface for NotebookLM
-    references-pane.js — Zotero references list + insert
-    api.js        — fetch wrapper
+app/
+  layout.tsx         — dark theme root layout
+  page.tsx           — renders MainApp
+  globals.css        — CSS variables + custom classes (block-content, version-pill, etc.)
+  api/
+    notebooks/list/  — GET: list NLM notebooks
+    notebooks/query/ — POST: query NLM
+    zotero/search/   — GET: search Zotero library
+    ai/rewrite/      — POST: rewrite block text
+    ai/chat/         — POST: document-aware AI chat
+    ai/general/      — POST: general AI Q&A
+components/
+  MainApp.tsx        — 3-pane layout + resizable dividers
+  TopBar.tsx         — project selector, new project, export
+  NotebookPane.tsx   — NLM chat with insert-to-editor
+  BlockEditor.tsx    — THE CORE: contentEditable blocks, DnD, versions, AI popup
+  EditorToolbar.tsx  — execCommand formatting toolbar
+  BlockAIPopup.tsx   — floating AI rewrite popup with presets
+  BottomPane.tsx     — tabbed container
+  AIWritingTab.tsx   — general chat + doc-aware write mode
+  ZoteroTab.tsx      — Zotero search + citation insert
+  NewProjectModal.tsx — project creation dialog
+store/
+  useStore.ts        — Zustand store (projects, blocks, chat, versions)
+types/
+  index.ts           — Block, Project, ChatMessage interfaces
+```
+
+## Storage structure (localStorage)
+```ts
+interface Block {
+  id: string;
+  type: string;
+  versions: { html: string; ts: number; instruction: string | null }[];
+  activeVersion: number;
+}
+interface Project {
+  id: string;
+  name: string;
+  notebookName: string;
+  notebookId: string | null;
+  zoteroCollection: string;
+  blocks: Block[];
+  chatHistory: { role: string; content: string; showInsert?: boolean }[];
+  conversationId: string | null;
+  createdAt: string;
+}
 ```
 
 ## Conventions
-- No build tooling — frontend loads deps from CDN
-- Projects stored as `data/projects/{id}.json`
-- Config via `.env` file loaded by python-dotenv
-- NLM queries go through Tailscale proxy; notebook/source listing via local `nlm` CLI
-- Zotero search uses Web API `/items?q=` endpoint; export fetches CSL-JSON per item key
+- All interactive components use `"use client"` directive
+- `contentEditable` blocks use refs (not controlled state) — set innerHTML on mount/version-switch, read on blur
+- Insert-to-editor uses `window.__insertToEditor` as a cross-component bridge
+- Auto-save debounced 500ms to localStorage on block changes
+- Export: client-side Markdown and HTML (no pandoc)
