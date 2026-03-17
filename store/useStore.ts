@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Project, Block, ChatMessage } from '@/types';
+import { Project, Block, ChatMessage, Citation, CitationData } from '@/types';
 
 function generateId(): string {
   return Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
@@ -11,21 +11,37 @@ function createBlock(html: string = '', type: string = 'paragraph'): Block {
     type,
     versions: [{ html, ts: Date.now(), instruction: null }],
     activeVersion: 0,
+    citationIds: [],
   };
 }
 
 const STORAGE_KEY = 'research_assistant_projects';
 
+export function getOrderedCitationMap(blocks: Block[], citations: Citation[]): Map<string, number> {
+  const map = new Map<string, number>();
+  let counter = 1;
+  for (const block of blocks) {
+    for (const cid of (block.citationIds || [])) {
+      if (!map.has(cid)) {
+        map.set(cid, counter++);
+      }
+    }
+  }
+  return map;
+}
+
 interface Store {
   projects: Project[];
   currentProjectId: string | null;
   currentProject: Project | null;
+  focusedBlockId: string | null;
   // Actions
   loadProjects: () => void;
   createProject: (data: Partial<Project>) => Project;
   selectProject: (id: string) => void;
   updateProjectField: (field: keyof Project, value: any) => void;
   saveCurrentProject: () => void;
+  setFocusedBlockId: (id: string | null) => void;
   // Block actions
   setBlocks: (blocks: Block[]) => void;
   addBlock: (html: string, afterId?: string) => Block;
@@ -34,6 +50,9 @@ interface Store {
   moveBlock: (fromId: string, toId: string, position: 'before' | 'after') => void;
   addBlockVersion: (id: string, html: string, instruction: string) => void;
   switchBlockVersion: (id: string, versionIndex: number) => void;
+  // Citation actions
+  addCitationToBlock: (blockId: string, zoteroKey: string, data: CitationData) => void;
+  removeCitationFromBlock: (blockId: string, citationId: string) => void;
   // Chat
   setChatHistory: (history: ChatMessage[]) => void;
   addChatMessage: (msg: ChatMessage) => void;
@@ -52,16 +71,23 @@ export const useStore = create<Store>((set, get) => ({
   projects: [],
   currentProjectId: null,
   currentProject: null,
+  focusedBlockId: null,
 
   loadProjects: () => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       const projects: Project[] = raw ? JSON.parse(raw) : [];
-      const currentProjectId = projects.length > 0 ? projects[0].id : null;
+      // Migrate legacy projects missing new fields
+      const migrated = projects.map(p => ({
+        ...p,
+        citations: p.citations || [],
+        blocks: (p.blocks || []).map(b => ({ ...b, citationIds: b.citationIds || [] })),
+      }));
+      const currentProjectId = migrated.length > 0 ? migrated[0].id : null;
       set({
-        projects,
+        projects: migrated,
         currentProjectId,
-        currentProject: currentProjectId ? projects.find(p => p.id === currentProjectId) || null : null,
+        currentProject: currentProjectId ? migrated.find(p => p.id === currentProjectId) || null : null,
       });
     } catch (e) {
       set({ projects: [], currentProjectId: null, currentProject: null });
@@ -76,6 +102,7 @@ export const useStore = create<Store>((set, get) => ({
       notebookId: data.notebookId || null,
       zoteroCollection: data.zoteroCollection || '',
       blocks: [createBlock('')],
+      citations: [],
       chatHistory: [],
       conversationId: null,
       createdAt: new Date().toISOString(),
@@ -106,6 +133,10 @@ export const useStore = create<Store>((set, get) => ({
   saveCurrentProject: () => {
     const { projects } = get();
     saveToStorage(projects);
+  },
+
+  setFocusedBlockId: (id) => {
+    set({ focusedBlockId: id });
   },
 
   setBlocks: (blocks) => {
@@ -225,6 +256,51 @@ export const useStore = create<Store>((set, get) => ({
       const blocks = p.blocks.map(b => {
         if (b.id !== id) return b;
         return { ...b, activeVersion: versionIndex };
+      });
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  addCitationToBlock: (blockId, zoteroKey, data) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const project = projects.find(p => p.id === currentProjectId);
+    if (!project) return;
+
+    // Find or create citation in project.citations
+    let citation = project.citations.find(c => c.zoteroKey === zoteroKey);
+    let citations = project.citations;
+    if (!citation) {
+      citation = { id: generateId(), zoteroKey, data };
+      citations = [...citations, citation];
+    }
+
+    const citId = citation.id;
+    const blocks = project.blocks.map(b => {
+      if (b.id !== blockId) return b;
+      if (b.citationIds.includes(citId)) return b;
+      return { ...b, citationIds: [...b.citationIds, citId] };
+    });
+
+    const updated = projects.map(p =>
+      p.id === currentProjectId ? { ...p, citations, blocks } : p
+    );
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  removeCitationFromBlock: (blockId, citationId) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.map(b => {
+        if (b.id !== blockId) return b;
+        return { ...b, citationIds: b.citationIds.filter(id => id !== citationId) };
       });
       return { ...p, blocks };
     });

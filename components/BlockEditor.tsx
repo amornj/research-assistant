@@ -1,9 +1,54 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useStore } from '@/store/useStore';
-import { Block } from '@/types';
+import { useStore, getOrderedCitationMap } from '@/store/useStore';
+import { Block, Citation } from '@/types';
 import BlockAIPopup from './BlockAIPopup';
+
+function formatAuthors(creators?: { firstName?: string; lastName?: string; name?: string }[]): string {
+  if (!creators || creators.length === 0) return '';
+  return creators
+    .slice(0, 3)
+    .map(c => c.lastName || c.name || c.firstName || '')
+    .filter(Boolean)
+    .join(', ') + (creators.length > 3 ? ' et al.' : '');
+}
+
+function CitationBadge({ num, citation }: { num: number; citation: Citation }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const authors = formatAuthors(citation.data.creators);
+  const year = citation.data.date ? citation.data.date.substring(0, 4) : '';
+  const abstract = citation.data.abstractNote
+    ? citation.data.abstractNote.substring(0, 200) + (citation.data.abstractNote.length > 200 ? '...' : '')
+    : '';
+
+  return (
+    <span className="relative inline-block">
+      <sup
+        className="text-[10px] bg-[#6c8aff]/20 text-[#6c8aff] px-1 py-0.5 rounded cursor-pointer hover:bg-[#6c8aff]/40 transition-colors select-none"
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+      >
+        [{num}]
+      </sup>
+      {showTooltip && (
+        <div className="absolute bottom-full left-0 mb-1 w-72 bg-[#1a1d27] border border-[#2d3140] rounded shadow-xl p-3 z-50 text-xs pointer-events-none">
+          <div className="font-semibold text-[#e1e4ed] mb-1 leading-tight">{citation.data.title || 'Untitled'}</div>
+          {(authors || year) && (
+            <div className="text-[#8b90a0]">{authors}{year ? ` (${year})` : ''}</div>
+          )}
+          {citation.data.publicationTitle && (
+            <div className="text-[#8b90a0] italic">{citation.data.publicationTitle}</div>
+          )}
+          {abstract && <div className="text-[#8b90a0] mt-1 leading-relaxed">{abstract}</div>}
+          {citation.data.DOI && (
+            <div className="text-[#6c8aff] mt-1">DOI: {citation.data.DOI}</div>
+          )}
+        </div>
+      )}
+    </span>
+  );
+}
 
 interface BlockItemProps {
   block: Block;
@@ -20,6 +65,8 @@ interface BlockItemProps {
   onShowAI: (blockId: string, pos: { top: number; left: number }) => void;
   onSwitchVersion: (id: string, idx: number) => void;
   focusedId: string | null;
+  citationMap: Map<string, number>;
+  projectCitations: Citation[];
 }
 
 function BlockItem({
@@ -37,6 +84,8 @@ function BlockItem({
   onShowAI,
   onSwitchVersion,
   focusedId,
+  citationMap,
+  projectCitations,
 }: BlockItemProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const activeHtml = block.versions[block.activeVersion]?.html || '';
@@ -70,6 +119,10 @@ function BlockItem({
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     onShowAI(block.id, { top: rect.top, left: rect.right + 8 });
   };
+
+  const blockCitations = (block.citationIds || [])
+    .map(cid => ({ num: citationMap.get(cid), citation: projectCitations.find(c => c.id === cid) }))
+    .filter((x): x is { num: number; citation: Citation } => x.num !== undefined && x.citation !== undefined);
 
   return (
     <div className="group relative">
@@ -110,6 +163,14 @@ function BlockItem({
             onBlur={() => onBlur(block.id, contentRef.current?.innerHTML || '')}
             onKeyDown={e => onKeyDown(e, block.id, contentRef.current?.innerHTML || '')}
           />
+          {/* Citation badges */}
+          {blockCitations.length > 0 && (
+            <div className="flex gap-0.5 mt-0.5 flex-wrap">
+              {blockCitations.map(({ num, citation }) => (
+                <CitationBadge key={citation.id} num={num} citation={citation} />
+              ))}
+            </div>
+          )}
           {/* Version pills */}
           {block.versions.length > 1 && (
             <div className="flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -134,7 +195,7 @@ function BlockItem({
 }
 
 export default function BlockEditor() {
-  const { currentProject, updateBlock, deleteBlock, addBlock, moveBlock, addBlockVersion, switchBlockVersion } = useStore();
+  const { currentProject, updateBlock, deleteBlock, addBlock, moveBlock, addBlockVersion, switchBlockVersion, setFocusedBlockId } = useStore();
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
@@ -144,6 +205,8 @@ export default function BlockEditor() {
   const pendingFocusId = useRef<string | null>(null);
 
   const blocks = currentProject?.blocks || [];
+  const projectCitations = currentProject?.citations || [];
+  const citationMap = getOrderedCitationMap(blocks, projectCitations);
 
   const scheduleAutoSave = useCallback(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -152,7 +215,10 @@ export default function BlockEditor() {
     }, 500);
   }, []);
 
-  const handleFocus = (id: string) => setFocusedId(id);
+  const handleFocus = (id: string) => {
+    setFocusedId(id);
+    setFocusedBlockId(id);
+  };
 
   const handleBlur = (id: string, html: string) => {
     updateBlock(id, html);
@@ -284,6 +350,8 @@ export default function BlockEditor() {
               onShowAI={handleShowAI}
               onSwitchVersion={switchBlockVersion}
               focusedId={focusedId}
+              citationMap={citationMap}
+              projectCitations={projectCitations}
             />
           </div>
         ))}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useStore } from '@/store/useStore';
 
 interface ZoteroItem {
   key: string;
@@ -41,6 +42,7 @@ export default function ZoteroTab() {
   const [results, setResults] = useState<ZoteroItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const { focusedBlockId, addCitationToBlock } = useStore();
 
   const handleSearch = async () => {
     if (!query.trim()) return;
@@ -64,7 +66,18 @@ export default function ZoteroTab() {
     }
   };
 
-  const handleInsert = (item: ZoteroItem) => {
+  // Primary: add as structured citation to focused block
+  const handleCite = (item: ZoteroItem) => {
+    if (!focusedBlockId) {
+      // Fall back to text insert if nothing focused
+      handleInsertText(item);
+      return;
+    }
+    addCitationToBlock(focusedBlockId, item.key, item.data);
+  };
+
+  // Secondary: insert full citation text into editor
+  const handleInsertText = (item: ZoteroItem) => {
     const citation = formatCitation(item);
     const html = `<p>${citation}</p>`;
     const fn = (window as any).__insertToEditor;
@@ -91,6 +104,9 @@ export default function ZoteroTab() {
             {loading ? '...' : 'Search'}
           </button>
         </div>
+        {!focusedBlockId && results.length > 0 && (
+          <div className="text-xs text-[#8b90a0] mt-1">Click a block in the editor to focus it, then use 📎 Cite</div>
+        )}
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {error && <div className="text-xs text-red-400 p-2">{error}</div>}
@@ -113,12 +129,21 @@ export default function ZoteroTab() {
             {item.data.publicationTitle && (
               <div className="text-xs text-[#8b90a0] italic truncate">{item.data.publicationTitle}</div>
             )}
-            <button
-              onClick={() => handleInsert(item)}
-              className="mt-1 text-xs text-[#6c8aff] hover:text-[#5a78f0] opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-              ↓ Insert citation
-            </button>
+            <div className="mt-1.5 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                onClick={() => handleCite(item)}
+                className="px-2 py-1 bg-[#6c8aff] hover:bg-[#5a78f0] text-white text-xs rounded font-medium transition-colors"
+                title={focusedBlockId ? 'Add citation badge to focused block' : 'Focus a block first, or falls back to text insert'}
+              >
+                📎 Cite
+              </button>
+              <button
+                onClick={() => handleInsertText(item)}
+                className="px-2 py-1 bg-[#232733] hover:bg-[#2d3140] text-[#8b90a0] hover:text-[#e1e4ed] text-xs rounded border border-[#2d3140] transition-colors"
+              >
+                ↓ Insert text
+              </button>
+            </div>
           </div>
         ))}
       </div>

@@ -87,6 +87,7 @@ export default function NotebookPane() {
         ))}
         {loading && (
           <div className="chat-message assistant">
+            <div className="text-xs text-[#8b90a0] mb-1">Querying NotebookLM (may take up to 60s)...</div>
             <div className="flex gap-1">
               <div className="w-1.5 h-1.5 bg-[#6c8aff] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
               <div className="w-1.5 h-1.5 bg-[#6c8aff] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />

@@ -31,8 +31,13 @@ export default function BottomPane() {
           Zotero
         </button>
       </div>
-      <div className="flex-1 overflow-hidden">
-        {activeTab === 'ai' ? <AIWritingTab /> : <ZoteroTab />}
+      <div className="flex-1 overflow-hidden relative">
+        <div style={{ display: activeTab === 'ai' ? 'flex' : 'none' }} className="flex-col h-full">
+          <AIWritingTab />
+        </div>
+        <div style={{ display: activeTab === 'zotero' ? 'flex' : 'none' }} className="flex-col h-full">
+          <ZoteroTab />
+        </div>
       </div>
     </div>
   );

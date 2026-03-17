@@ -99,9 +99,9 @@ export default function AIWritingTab() {
             {msg.role === 'assistant' && msg.showInsert && (
               <button
                 onClick={() => handleInsert(msg.content)}
-                className="mt-1 text-xs text-[#6c8aff] hover:text-[#5a78f0] transition-colors"
+                className="mt-2 px-3 py-1.5 bg-[#6c8aff] hover:bg-[#5a78f0] text-white text-xs rounded font-medium transition-colors flex items-center gap-1"
               >
-                ↓ Insert to editor
+                ⬇ Push to Writing Area
               </button>
             )}
           </div>

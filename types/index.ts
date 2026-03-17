@@ -4,11 +4,31 @@ export interface BlockVersion {
   instruction: string | null;
 }
 
+export interface CitationData {
+  title?: string;
+  creators?: { firstName?: string; lastName?: string; name?: string }[];
+  date?: string;
+  publicationTitle?: string;
+  DOI?: string;
+  abstractNote?: string;
+  volume?: string;
+  pages?: string;
+  url?: string;
+  itemType?: string;
+}
+
+export interface Citation {
+  id: string;
+  zoteroKey: string;
+  data: CitationData;
+}
+
 export interface Block {
   id: string;
   type: string;
   versions: BlockVersion[];
   activeVersion: number;
+  citationIds: string[];
 }
 
 export interface ChatMessage {
@@ -24,6 +44,7 @@ export interface Project {
   notebookId: string | null;
   zoteroCollection: string;
   blocks: Block[];
+  citations: Citation[];
   chatHistory: ChatMessage[];
   conversationId: string | null;
   createdAt: string;
