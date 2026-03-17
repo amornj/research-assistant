@@ -27,7 +27,7 @@ function htmlToText(html: string): string {
     .replace(/&quot;/g, '"');
 }
 
-function formatCitationEntry(citation: Citation, num: number): string {
+function formatCitationEntry(citation: Citation): string {
   const { data } = citation;
   const authors = (data.creators || [])
     .map(c => c.lastName || c.name || c.firstName || '')
@@ -40,7 +40,7 @@ function formatCitationEntry(citation: Citation, num: number): string {
   const pages = data.pages ? `${data.pages}` : '';
   const doi = data.DOI ? `DOI: ${data.DOI}` : '';
 
-  let entry = `[${num}] ${authors}${year ? ` (${year})` : ''}. ${title}.`;
+  let entry = `${authors}${year ? ` (${year})` : ''}. ${title}.`;
   if (journal) entry += ` ${journal}`;
   if (vol) entry += `, ${vol}`;
   if (pages) entry += `, ${pages}`;
@@ -49,7 +49,7 @@ function formatCitationEntry(citation: Citation, num: number): string {
   return entry;
 }
 
-function formatCitationEntryHTML(citation: Citation, num: number): string {
+function formatCitationEntryHTML(citation: Citation): string {
   const { data } = citation;
   const authors = (data.creators || [])
     .map(c => c.lastName || c.name || c.firstName || '')
@@ -64,7 +64,7 @@ function formatCitationEntryHTML(citation: Citation, num: number): string {
     ? `<a href="https://doi.org/${data.DOI}" style="color:#6c8aff">DOI: ${data.DOI}</a>`
     : '';
 
-  let entry = `<li><strong>[${num}]</strong> ${authors}${year ? ` (${year})` : ''}. <em>${title}</em>.`;
+  let entry = `<li>${authors}${year ? ` (${year})` : ''}. <em>${title}</em>.`;
   if (journal) entry += ` ${journal}`;
   if (vol) entry += `, ${vol}`;
   if (pages) entry += `, ${pages}`;
@@ -107,7 +107,7 @@ export default function TopBar({ onNewProject }: TopBarProps) {
       for (const [citId, num] of allCited) {
         const citation = currentProject.citations.find(c => c.id === citId);
         if (citation) {
-          md += formatCitationEntry(citation, num) + '\n\n';
+          md += `${num}. ${formatCitationEntry(citation)}\n\n`;
         }
       }
     }
@@ -151,7 +151,7 @@ export default function TopBar({ onNewProject }: TopBarProps) {
       for (const [citId, num] of allCited) {
         const citation = currentProject.citations.find(c => c.id === citId);
         if (citation) {
-          body += formatCitationEntryHTML(citation, num);
+          body += formatCitationEntryHTML(citation);
         }
       }
       body += '</ol>';
