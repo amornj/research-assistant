@@ -294,6 +294,11 @@ export const useStore = create<Store>((set, get) => ({
           }
         }
       }
+      // Save per-segment citation mapping for disassemble
+      const segmentCitations: string[][] = [
+        [...(firstBlock.citationIds || [])],
+        ...restBlocks.map(b => [...(b.citationIds || [])]),
+      ];
       // Build new block (first block with new version)
       const newVersion = { html: mergedHtml, ts: Date.now(), instruction: 'Merged' };
       const newVersions = [...firstBlock.versions, newVersion].slice(-5);
@@ -302,6 +307,7 @@ export const useStore = create<Store>((set, get) => ({
         versions: newVersions,
         activeVersion: newVersions.length - 1,
         citationIds: mergedCitationIds,
+        mergeSegmentCitations: segmentCitations,
       };
       const restIdSet = new Set(restIds);
       const blocks = p.blocks
@@ -326,6 +332,10 @@ export const useStore = create<Store>((set, get) => ({
       // Split on <br><br> boundaries
       const segments = html.split(/<br\s*\/?>\s*<br\s*\/?>/gi).map(s => s.trim()).filter(s => s.length > 0);
       if (segments.length <= 1) return p; // nothing to split
+      // Use per-segment citation mapping if available (from merge), else empty
+      const segCitations = block.mergeSegmentCitations;
+      const hasSegCitations = segCitations && segCitations.length === segments.length;
+
       // First segment replaces original block
       const firstHtml = segments[0];
       const newVersion = { html: firstHtml, ts: Date.now(), instruction: 'Split' };
@@ -334,14 +344,16 @@ export const useStore = create<Store>((set, get) => ({
         ...block,
         versions: newVersions,
         activeVersion: newVersions.length - 1,
+        citationIds: hasSegCitations ? segCitations[0] : (block.citationIds || []),
+        mergeSegmentCitations: undefined,
       };
       // Remaining segments become new blocks
-      const newBlocks: Block[] = segments.slice(1).map(seg => ({
+      const newBlocks: Block[] = segments.slice(1).map((seg, i) => ({
         id: generateId(),
         type: block.type,
         versions: [{ html: seg, ts: Date.now(), instruction: null }],
         activeVersion: 0,
-        citationIds: [...(block.citationIds || [])],
+        citationIds: hasSegCitations ? segCitations[i + 1] : [],
       }));
       const blocks = [...p.blocks];
       blocks.splice(blockIdx, 1, updatedFirstBlock, ...newBlocks);

@@ -14,25 +14,49 @@ function formatAuthors(creators?: { firstName?: string; lastName?: string; name?
     .join(', ') + (creators.length > 3 ? ' et al.' : '');
 }
 
-function CitationBadge({ num, citation }: { num: number; citation: Citation }) {
+function CitationBadge({
+  num,
+  citation,
+  blockId,
+  onRemove,
+}: {
+  num: number;
+  citation: Citation;
+  blockId: string;
+  onRemove: (blockId: string, citationId: string) => void;
+}) {
   const [showTooltip, setShowTooltip] = useState(false);
   const authors = formatAuthors(citation.data.creators);
   const year = citation.data.date ? citation.data.date.substring(0, 4) : '';
   const abstract = citation.data.abstractNote
     ? citation.data.abstractNote.substring(0, 200) + (citation.data.abstractNote.length > 200 ? '...' : '')
     : '';
+  const doiUrl = citation.data.DOI
+    ? (citation.data.DOI.startsWith('http') ? citation.data.DOI : `https://doi.org/${citation.data.DOI}`)
+    : citation.data.url || null;
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onRemove(blockId, citation.id);
+  };
 
   return (
-    <span className="relative inline-block">
+    <span className="relative inline-block" onContextMenu={handleContextMenu}>
       <sup
         className="text-[10px] bg-[#6c8aff]/20 text-[#6c8aff] px-1 py-0.5 rounded cursor-pointer hover:bg-[#6c8aff]/40 transition-colors select-none"
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
+        title="Right-click to remove"
       >
         [{num}]
       </sup>
       {showTooltip && (
-        <div className="absolute bottom-full left-0 mb-1 w-72 bg-[#1a1d27] border border-[#2d3140] rounded shadow-xl p-3 z-50 text-xs pointer-events-none">
+        <div
+          className="absolute bottom-full left-0 mb-1 w-72 bg-[#1a1d27] border border-[#2d3140] rounded shadow-xl p-3 z-50 text-xs"
+          onMouseEnter={() => setShowTooltip(true)}
+          onMouseLeave={() => setShowTooltip(false)}
+        >
           <div className="font-semibold text-[#e1e4ed] mb-1 leading-tight">{citation.data.title || 'Untitled'}</div>
           {(authors || year) && (
             <div className="text-[#8b90a0]">{authors}{year ? ` (${year})` : ''}</div>
@@ -41,8 +65,16 @@ function CitationBadge({ num, citation }: { num: number; citation: Citation }) {
             <div className="text-[#8b90a0] italic">{citation.data.publicationTitle}</div>
           )}
           {abstract && <div className="text-[#8b90a0] mt-1 leading-relaxed">{abstract}</div>}
-          {citation.data.DOI && (
-            <div className="text-[#6c8aff] mt-1">DOI: {citation.data.DOI}</div>
+          {doiUrl && (
+            <a
+              href={doiUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[#6c8aff] mt-1 block hover:underline cursor-pointer"
+              onDoubleClick={(e) => { e.stopPropagation(); window.open(doiUrl, '_blank'); }}
+            >
+              DOI: {citation.data.DOI || doiUrl}
+            </a>
           )}
         </div>
       )}
@@ -58,11 +90,12 @@ interface BlockContextMenuProps {
   onOpenAI: () => void;
   onSaveVersion: () => void;
   onDisassemble: () => void;
+  onDeleteBlock: () => void;
   canDisassemble: boolean;
 }
 
 function BlockContextMenu({
-  position, onClose, onOpenAI, onSaveVersion, onDisassemble, canDisassemble,
+  position, onClose, onOpenAI, onSaveVersion, onDisassemble, onDeleteBlock, canDisassemble,
 }: BlockContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -95,6 +128,10 @@ function BlockContextMenu({
           🔀 Disassemble Block
         </button>
       )}
+      <div className="border-t border-[#2d3140] my-0.5" />
+      <button className={`${btnClass} text-red-400 hover:text-red-300 hover:bg-red-500/10`} onClick={onDeleteBlock}>
+        🗑️ Delete Block
+      </button>
     </div>
   );
 }
@@ -120,6 +157,7 @@ interface BlockItemProps {
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
   draggedId: string | null;
+  onRemoveCitation: (blockId: string, citationId: string) => void;
 }
 
 function BlockItem({
@@ -143,6 +181,7 @@ function BlockItem({
   isSelected,
   onToggleSelect,
   draggedId,
+  onRemoveCitation,
 }: BlockItemProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const activeHtml = block.versions[block.activeVersion]?.html || '';
@@ -252,7 +291,7 @@ function BlockItem({
           {blockCitations.length > 0 && (
             <div className="flex gap-0.5 mt-0.5 flex-wrap">
               {blockCitations.map(({ num, citation }) => (
-                <CitationBadge key={citation.id} num={num} citation={citation} />
+                <CitationBadge key={citation.id} num={num} citation={citation} blockId={block.id} onRemove={onRemoveCitation} />
               ))}
             </div>
           )}
@@ -291,6 +330,7 @@ export default function BlockEditor() {
     addBlockVersion,
     switchBlockVersion,
     setFocusedBlockId,
+    removeCitationFromBlock,
   } = useStore();
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
@@ -460,6 +500,12 @@ export default function BlockEditor() {
     setContextMenu(null);
   };
 
+  const handleContextDeleteBlock = () => {
+    if (!contextMenu) return;
+    deleteBlock(contextMenu.blockId);
+    setContextMenu(null);
+  };
+
   const handleContextOpenAI = () => {
     if (!contextMenu) return;
     setAiPopup({ blockId: contextMenu.blockId, pos: contextMenu.pos });
@@ -547,6 +593,7 @@ export default function BlockEditor() {
               isSelected={selectedBlockIds.has(block.id)}
               onToggleSelect={handleToggleSelect}
               draggedId={draggedId}
+              onRemoveCitation={removeCitationFromBlock}
             />
           </div>
         ))}
@@ -572,6 +619,7 @@ export default function BlockEditor() {
           onOpenAI={handleContextOpenAI}
           onSaveVersion={handleContextSaveVersion}
           onDisassemble={handleContextDisassemble}
+          onDeleteBlock={handleContextDeleteBlock}
           canDisassemble={canDisassemble}
         />
       )}

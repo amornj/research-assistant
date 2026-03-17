@@ -29,6 +29,8 @@ export interface Block {
   versions: BlockVersion[];
   activeVersion: number;
   citationIds: string[];
+  /** Per-segment citation mapping from merge — used by disassemble to restore citations correctly */
+  mergeSegmentCitations?: string[][];
 }
 
 export interface ChatMessage {
