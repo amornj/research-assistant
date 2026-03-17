@@ -50,6 +50,8 @@ interface Store {
   moveBlock: (fromId: string, toId: string, position: 'before' | 'after') => void;
   addBlockVersion: (id: string, html: string, instruction: string) => void;
   switchBlockVersion: (id: string, versionIndex: number) => void;
+  mergeBlocks: (blockIds: string[]) => void;
+  splitBlock: (blockId: string, liveHtml?: string) => void;
   // Citation actions
   addCitationToBlock: (blockId: string, zoteroKey: string, data: CitationData) => void;
   removeCitationFromBlock: (blockId: string, citationId: string) => void;
@@ -257,6 +259,92 @@ export const useStore = create<Store>((set, get) => ({
         if (b.id !== id) return b;
         return { ...b, activeVersion: versionIndex };
       });
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  mergeBlocks: (blockIds) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId || blockIds.length < 2) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      // Determine document order by filtering p.blocks
+      const orderedIds = p.blocks.map(b => b.id).filter(id => blockIds.includes(id));
+      if (orderedIds.length < 2) return p;
+      const [firstId, ...restIds] = orderedIds;
+      const firstBlock = p.blocks.find(b => b.id === firstId)!;
+      const restBlocks = restIds.map(id => p.blocks.find(b => b.id === id)!).filter(Boolean);
+      // Merge HTML with <br><br> separator
+      const allHtmlParts = [
+        firstBlock.versions[firstBlock.activeVersion]?.html || '',
+        ...restBlocks.map(b => b.versions[b.activeVersion]?.html || ''),
+      ];
+      const mergedHtml = allHtmlParts.filter(h => h.trim()).join('<br><br>');
+      // Union citationIds preserving order
+      const seenCids = new Set<string>();
+      const mergedCitationIds: string[] = [];
+      for (const b of [firstBlock, ...restBlocks]) {
+        for (const cid of (b.citationIds || [])) {
+          if (!seenCids.has(cid)) {
+            seenCids.add(cid);
+            mergedCitationIds.push(cid);
+          }
+        }
+      }
+      // Build new block (first block with new version)
+      const newVersion = { html: mergedHtml, ts: Date.now(), instruction: 'Merged' };
+      const newVersions = [...firstBlock.versions, newVersion].slice(-5);
+      const mergedBlock: Block = {
+        ...firstBlock,
+        versions: newVersions,
+        activeVersion: newVersions.length - 1,
+        citationIds: mergedCitationIds,
+      };
+      const restIdSet = new Set(restIds);
+      const blocks = p.blocks
+        .filter(b => !restIdSet.has(b.id))
+        .map(b => b.id === firstId ? mergedBlock : b);
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  splitBlock: (blockId, liveHtml) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blockIdx = p.blocks.findIndex(b => b.id === blockId);
+      if (blockIdx === -1) return p;
+      const block = p.blocks[blockIdx];
+      const html = liveHtml !== undefined ? liveHtml : (block.versions[block.activeVersion]?.html || '');
+      // Split on <br><br> boundaries
+      const segments = html.split(/<br\s*\/?>\s*<br\s*\/?>/gi).map(s => s.trim()).filter(s => s.length > 0);
+      if (segments.length <= 1) return p; // nothing to split
+      // First segment replaces original block
+      const firstHtml = segments[0];
+      const newVersion = { html: firstHtml, ts: Date.now(), instruction: 'Split' };
+      const newVersions = [...block.versions, newVersion].slice(-5);
+      const updatedFirstBlock: Block = {
+        ...block,
+        versions: newVersions,
+        activeVersion: newVersions.length - 1,
+      };
+      // Remaining segments become new blocks
+      const newBlocks: Block[] = segments.slice(1).map(seg => ({
+        id: generateId(),
+        type: block.type,
+        versions: [{ html: seg, ts: Date.now(), instruction: null }],
+        activeVersion: 0,
+        citationIds: [...(block.citationIds || [])],
+      }));
+      const blocks = [...p.blocks];
+      blocks.splice(blockIdx, 1, updatedFirstBlock, ...newBlocks);
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;

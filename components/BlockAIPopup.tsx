@@ -19,10 +19,16 @@ const PRESETS = [
   'Fix grammar',
 ];
 
+const MODELS = [
+  { value: 'anthropic/claude-sonnet-4-20250514', label: '🔍 Geo (Sonnet 4.6)' },
+  { value: 'google/gemini-2.5-flash', label: '🔄 Echo (Gemini Flash)' },
+];
+
 export default function BlockAIPopup({ blockId, blockHtml, onApply, onClose, position }: Props) {
   const [instruction, setInstruction] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [selectedModel, setSelectedModel] = useState(MODELS[0].value);
   const inputRef = useRef<HTMLInputElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
 
@@ -41,7 +47,6 @@ export default function BlockAIPopup({ blockId, blockHtml, onApply, onClose, pos
     if (!inst.trim()) return;
     setLoading(true);
     setError('');
-    // Extract plain text for rewrite
     const tmp = document.createElement('div');
     tmp.innerHTML = blockHtml;
     const plainText = tmp.textContent || '';
@@ -49,7 +54,7 @@ export default function BlockAIPopup({ blockId, blockHtml, onApply, onClose, pos
       const res = await fetch('/api/ai/rewrite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: plainText, instruction: inst }),
+        body: JSON.stringify({ text: plainText, instruction: inst, model: selectedModel }),
       });
       const data = await res.json();
       if (data.text) {
@@ -71,7 +76,18 @@ export default function BlockAIPopup({ blockId, blockHtml, onApply, onClose, pos
       className="fixed z-50 bg-[#1a1d27] border border-[#2d3140] rounded-lg shadow-xl p-3 w-72"
       style={{ top: position.top, left: position.left }}
     >
-      <div className="text-xs text-[#8b90a0] mb-2 font-medium">AI Rewrite</div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs text-[#8b90a0] font-medium">✨ AI Rewrite</div>
+        <select
+          value={selectedModel}
+          onChange={e => setSelectedModel(e.target.value)}
+          className="px-1.5 py-0.5 text-xs bg-[#232733] border border-[#2d3140] rounded text-[#8b90a0] focus:outline-none focus:border-[#6c8aff] cursor-pointer"
+        >
+          {MODELS.map(m => (
+            <option key={m.value} value={m.value}>{m.label}</option>
+          ))}
+        </select>
+      </div>
       <div className="flex flex-wrap gap-1 mb-2">
         {PRESETS.map(p => (
           <button

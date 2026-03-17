@@ -11,12 +11,18 @@ interface Message {
   showInsert?: boolean;
 }
 
+const MODELS = [
+  { value: 'anthropic/claude-sonnet-4-20250514', label: '🔍 Geo (Sonnet 4.6)' },
+  { value: 'google/gemini-2.5-flash', label: '🔄 Echo (Gemini Flash)' },
+];
+
 export default function AIWritingTab() {
   const { currentProject } = useStore();
   const [mode, setMode] = useState<Mode>('chat');
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  const [selectedModel, setSelectedModel] = useState(MODELS[0].value);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -41,7 +47,7 @@ export default function AIWritingTab() {
     setLoading(true);
     try {
       const endpoint = mode === 'write' ? '/api/ai/chat' : '/api/ai/general';
-      const body: Record<string, unknown> = { message: question };
+      const body: Record<string, unknown> = { message: question, model: selectedModel };
       if (mode === 'write') {
         body.documentContext = getDocContext();
         body.history = messages.map(m => ({ role: m.role, content: m.content }));
@@ -68,7 +74,7 @@ export default function AIWritingTab() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#2d3140] flex-shrink-0">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#2d3140] flex-shrink-0 flex-wrap">
         <button
           onClick={() => setMode('chat')}
           className={`px-2 py-0.5 text-xs rounded transition-colors ${mode === 'chat' ? 'bg-[#6c8aff] text-white' : 'bg-[#232733] text-[#8b90a0] hover:text-[#e1e4ed]'}`}
@@ -81,9 +87,15 @@ export default function AIWritingTab() {
         >
           Write to Doc
         </button>
-        <span className="text-xs text-[#8b90a0] ml-1">
-          {mode === 'write' ? '(aware of your document)' : '(general AI assistant)'}
-        </span>
+        <select
+          value={selectedModel}
+          onChange={e => setSelectedModel(e.target.value)}
+          className="ml-auto px-1.5 py-0.5 text-xs bg-[#232733] border border-[#2d3140] rounded text-[#8b90a0] focus:outline-none focus:border-[#6c8aff] cursor-pointer"
+        >
+          {MODELS.map(m => (
+            <option key={m.value} value={m.value}>{m.label}</option>
+          ))}
+        </select>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {messages.length === 0 && (
