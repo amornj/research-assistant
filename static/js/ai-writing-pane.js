@@ -1,249 +1,263 @@
 import { post, get } from './api.js';
 
-const modelSelect = document.getElementById('ai-model-select');
-const logEl = document.getElementById('ai-writing-log');
-const contextMenu = document.getElementById('ai-context-menu');
-const instructionInput = document.getElementById('ai-rewrite-instruction');
-const rewriteBtn = document.getElementById('ai-rewrite-go');
-const oauthBtn = document.getElementById('ai-oauth-btn');
-const oauthStatus = document.getElementById('ai-oauth-status');
-const chatInput = document.getElementById('ai-chat-input');
-const chatSendBtn = document.getElementById('ai-chat-send');
+let agentSelect, modelSelect, messagesEl;
+let chatInput, chatSendBtn, versionBar, versionList;
+let writeModeBtn, chatModeBtn;
 
 let getEditorFn = null;
-let selectedText = '';
-let selectionFrom = 0;
-let selectionTo = 0;
+let getProjectFn = null;
+let saveProjectFn = null;
+let currentMode = 'write'; // 'write' | 'chat'
 
-export function init(getEditor) {
+export function init(getEditor, getProject, saveProject) {
   getEditorFn = getEditor;
-  setupContextMenu();
-  setupMiniMaxOAuth();
-  checkOAuthStatus();
-  setupAIChat();
+  getProjectFn = getProject;
+  saveProjectFn = saveProject;
+
+  agentSelect  = document.getElementById('ai-agent-select');
+  modelSelect  = document.getElementById('ai-model-select');
+  messagesEl   = document.getElementById('ai-chat-messages');
+  chatInput    = document.getElementById('ai-chat-input');
+  chatSendBtn  = document.getElementById('ai-chat-send');
+  versionBar   = document.getElementById('ai-version-bar');
+  versionList  = document.getElementById('ai-version-list');
+  writeModeBtn = document.getElementById('mode-write-btn');
+  chatModeBtn  = document.getElementById('mode-chat-btn');
+
+  if (!messagesEl || !chatInput || !chatSendBtn) {
+    console.error('aiWriting.init(): missing required DOM elements');
+    return;
+  }
+
+  setupModeToggle();
+  setupChat();
+  loadAgents();
+
+  if (agentSelect) agentSelect.addEventListener('change', () => loadModels(agentSelect.value));
 }
 
 // ---------------------------------------------------------------------------
-// MiniMax OAuth
+// Mode toggle
 // ---------------------------------------------------------------------------
 
-async function checkOAuthStatus() {
+function setupModeToggle() {
+  if (!writeModeBtn || !chatModeBtn) return;
+  writeModeBtn.addEventListener('click', () => setMode('write'));
+  chatModeBtn.addEventListener('click', () => setMode('chat'));
+}
+
+function setMode(mode) {
+  currentMode = mode;
+  writeModeBtn.classList.toggle('active', mode === 'write');
+  chatModeBtn.classList.toggle('active', mode === 'chat');
+  chatInput.placeholder = mode === 'write'
+    ? 'Ask AI to edit document... (e.g. "Rewrite in formal tone")'
+    : 'Ask anything... (e.g. "What are the side effects of adalimumab?")';
+}
+
+// ---------------------------------------------------------------------------
+// OpenClaw discovery
+// ---------------------------------------------------------------------------
+
+async function loadAgents() {
+  if (!agentSelect) return;
   try {
-    const { connected } = await get('/api/ai/minimax/oauth/status');
-    setConnectedUI(connected);
-  } catch {
-    setConnectedUI(false);
-  }
-}
-
-function setConnectedUI(connected) {
-  if (connected) {
-    oauthBtn.classList.add('hidden');
-    oauthStatus.classList.remove('hidden');
-  } else {
-    oauthBtn.classList.remove('hidden');
-    oauthBtn.disabled = false;
-    oauthBtn.textContent = 'Connect';
-    oauthStatus.classList.add('hidden');
-  }
-}
-
-function setupMiniMaxOAuth() {
-  oauthBtn.addEventListener('click', startMiniMaxOAuth);
-
-  // Disconnect link on the status badge
-  oauthStatus.style.cursor = 'default';
-  const disconnectBtn = document.createElement('button');
-  disconnectBtn.textContent = '✕';
-  disconnectBtn.title = 'Disconnect';
-  disconnectBtn.className = 'ai-oauth-disconnect';
-  disconnectBtn.addEventListener('click', async () => {
-    await fetch('/api/ai/minimax/oauth/disconnect', { method: 'DELETE' });
-    setConnectedUI(false);
-    addLog('Disconnected from MiniMax');
-  });
-  oauthStatus.appendChild(disconnectBtn);
-
-  // Listen for OAuth result from popup window
-  window.addEventListener('message', (e) => {
-    if (e.data?.type !== 'minimax-oauth') return;
-    if (e.data.status === 'success') {
-      setConnectedUI(true);
-      addLog('Successfully connected to MiniMax 2.5', false, true);
-    } else {
-      setConnectedUI(false);
-      addLog(`OAuth failed: ${e.data.status}`, true);
-    }
-  });
-}
-
-async function startMiniMaxOAuth() {
-  oauthBtn.disabled = true;
-  oauthBtn.textContent = 'Connecting...';
-  addLog('Opening MiniMax authorization...');
-
-  try {
-    const { auth_url } = await get('/api/ai/minimax/oauth/start');
-    const popup = window.open(
-      auth_url,
-      'minimax-oauth',
-      'width=520,height=680,toolbar=no,menubar=no,scrollbars=yes,resizable=yes'
-    );
-
-    if (!popup) {
-      addLog('Popup blocked — please allow popups for this site.', true);
-      oauthBtn.disabled = false;
-      oauthBtn.textContent = 'Connect';
+    const agents = await get('/api/ai/openclaw/agents');
+    if (!Array.isArray(agents) || agents.length === 0) {
+      agentSelect.innerHTML = '<option value="">Default agent</option>';
+      loadModels('');
       return;
     }
-
-    // Poll in case postMessage is missed (popup closed manually)
-    const poll = setInterval(async () => {
-      if (popup.closed) {
-        clearInterval(poll);
-        const { connected } = await get('/api/ai/minimax/oauth/status');
-        setConnectedUI(connected);
-        if (!connected) {
-          addLog('Authorization window closed without completing.', true);
-        }
-      }
-    }, 800);
+    agentSelect.innerHTML = agents.map(a =>
+      `<option value="${a.id}" ${a.isDefault ? 'selected' : ''}>${a.identityEmoji || ''} ${a.identityName || a.id}</option>`
+    ).join('');
+    loadModels(agentSelect.value);
   } catch (e) {
-    addLog(`Error starting OAuth: ${e.message}`, true);
-    oauthBtn.disabled = false;
-    oauthBtn.textContent = 'Connect';
+    console.error('Failed to load agents', e);
+    if (agentSelect) agentSelect.innerHTML = '<option value="">Default agent</option>';
+    loadModels('');
+  }
+}
+
+async function loadModels(agentId) {
+  if (!modelSelect) return;
+  try {
+    const url = agentId ? `/api/ai/openclaw/models?agent_id=${agentId}` : '/api/ai/openclaw/models';
+    const models = await get(url);
+    if (!Array.isArray(models) || models.length === 0) {
+      modelSelect.innerHTML = '<option value="">Default (Claude)</option>';
+      return;
+    }
+    modelSelect.innerHTML = '<option value="">Default (Claude)</option>' +
+      models.map(m => `<option value="${m.key}">${m.name}</option>`).join('');
+  } catch (e) {
+    if (modelSelect) modelSelect.innerHTML = '<option value="">Default (Claude)</option>';
   }
 }
 
 // ---------------------------------------------------------------------------
-// AI Chat (whole document edit)
+// Versioning (document-level, for Write to Doc mode)
 // ---------------------------------------------------------------------------
 
-function setupAIChat() {
-  chatSendBtn.addEventListener('click', doAIChat);
+export function refreshVersions() {
+  const project = getProjectFn();
+  if (!project || !versionBar || !versionList) return;
+  const docVers = project.document_versions || [];
+  if (docVers.length > 0) {
+    versionBar.classList.remove('hidden');
+    versionList.innerHTML = '';
+    docVers.forEach((html, i) => {
+      const btn = document.createElement('div');
+      btn.className = 'version-badge';
+      btn.textContent = `V${i + 1}`;
+      btn.title = 'Revert to this version';
+      btn.onclick = () => revertToDocVersion(i);
+      versionList.appendChild(btn);
+    });
+  } else {
+    versionBar.classList.add('hidden');
+  }
+}
+
+function revertToDocVersion(index) {
+  const project = getProjectFn();
+  const editor = getEditorFn();
+  if (!project || !editor) return;
+  const docVers = project.document_versions || [];
+  const targetHtml = docVers[index];
+  if (!targetHtml) return;
+  const currentHtml = editor.getHTML();
+  docVers[index] = currentHtml;
+  editor.commands.setContent(targetHtml);
+  addMessage('status', `Reverted to version V${index + 1}`);
+  saveProjectFn();
+  refreshVersions();
+}
+
+function addDocVersion(html) {
+  const project = getProjectFn();
+  if (!project) return;
+  if (!project.document_versions) project.document_versions = [];
+  project.document_versions.push(html);
+  if (project.document_versions.length > 5) project.document_versions.shift();
+  refreshVersions();
+}
+
+// ---------------------------------------------------------------------------
+// Chat send handler
+// ---------------------------------------------------------------------------
+
+function setupChat() {
+  chatSendBtn.addEventListener('click', doSend);
   chatInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); doAIChat(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
   });
 }
 
-async function doAIChat() {
-  const instruction = chatInput.value.trim();
-  if (!instruction) return;
+async function doSend() {
+  const text = chatInput.value.trim();
+  if (!text) return;
   chatInput.value = '';
+  if (currentMode === 'write') {
+    await doWriteToDoc(text);
+  } else {
+    await doChat(text);
+  }
+}
 
+// Mode 1: Write to Doc — AI edits the entire document (re-parses into blocks)
+async function doWriteToDoc(instruction) {
   const editor = getEditorFn();
-  if (!editor) return;
-
-  addLog(`AI Edit: "${instruction}"...`);
+  if (!editor) {
+    addMessage('status', 'No document open — create or select a project first', false, true);
+    return;
+  }
+  const currentHtml = editor.getHTML();
+  addMessage('user', instruction);
+  const statusEl = addMessage('status', '✦ Editing document...');
   chatSendBtn.disabled = true;
 
   try {
     const result = await post('/api/ai/chat', {
-      html: editor.getHTML(),
+      html: currentHtml,
       instruction,
-      model: modelSelect.value,
+      agent_id: agentSelect?.value || '',
+      model_id: modelSelect?.value || '',
     });
-
     if (result.html) {
+      addDocVersion(currentHtml);
       editor.commands.setContent(result.html);
-      addLog('Document updated by AI', false, true);
+      statusEl.textContent = '✓ Document updated';
+      statusEl.classList.add('success');
+      saveProjectFn();
     } else {
-      addLog('No changes returned by AI', true);
+      statusEl.textContent = 'No changes returned by AI';
     }
   } catch (e) {
-    addLog(`Error: ${e.message}`, true);
+    statusEl.textContent = `Error: ${e.message}`;
+    statusEl.classList.add('error');
+  } finally {
+    chatSendBtn.disabled = false;
+  }
+}
+
+// Mode 2: Chat — general Q&A, response shown with "Push to Editor" button
+async function doChat(message) {
+  addMessage('user', message);
+  const replyEl = addMessage('assistant', '...');
+  chatSendBtn.disabled = true;
+
+  try {
+    const result = await post('/api/ai/general', {
+      message,
+      agent_id: agentSelect?.value || '',
+      model_id: modelSelect?.value || '',
+    });
+    const text = result.text || '(no response)';
+
+    // Set text content
+    replyEl.textContent = '';
+    const textSpan = document.createElement('span');
+    textSpan.textContent = text;
+    replyEl.appendChild(textSpan);
+
+    // Add push-to-editor button
+    const editor = getEditorFn();
+    if (editor?.addBlock) {
+      const pushBtn = document.createElement('button');
+      pushBtn.className = 'ai-msg-push-btn';
+      pushBtn.textContent = '↗ Push to Editor';
+      pushBtn.addEventListener('click', () => {
+        editor.addBlock(`<p>${text.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>')}</p>`);
+        pushBtn.textContent = '✓ Added';
+        pushBtn.disabled = true;
+      });
+      replyEl.appendChild(pushBtn);
+    }
+  } catch (e) {
+    replyEl.textContent = `Error: ${e.message}`;
+    replyEl.classList.add('error');
   } finally {
     chatSendBtn.disabled = false;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Context menu rewrite
+// Message rendering
 // ---------------------------------------------------------------------------
 
-function setupContextMenu() {
-  const editorMount = document.getElementById('editor-mount');
-  editorMount.addEventListener('contextmenu', (e) => {
-    const editor = getEditorFn();
-    if (!editor) return;
-
-    const { from, to } = editor.state.selection;
-    const text = editor.state.doc.textBetween(from, to, ' ');
-    if (!text.trim()) return;
-
-    e.preventDefault();
-    selectedText = text;
-    selectionFrom = from;
-    selectionTo = to;
-
-    contextMenu.style.left = `${e.clientX}px`;
-    contextMenu.style.top = `${e.clientY}px`;
-    contextMenu.classList.remove('hidden');
-    instructionInput.value = '';
-    instructionInput.focus();
-  });
-
-  document.addEventListener('click', (e) => {
-    if (!contextMenu.contains(e.target)) contextMenu.classList.add('hidden');
-  });
-
-  instructionInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); doRewrite(); }
-    if (e.key === 'Escape') contextMenu.classList.add('hidden');
-  });
-
-  rewriteBtn.addEventListener('click', doRewrite);
-}
-
-async function doRewrite() {
-  const instruction = instructionInput.value.trim();
-  if (!instruction || !selectedText) return;
-
-  contextMenu.classList.add('hidden');
-  addLog(`Rewriting: "${instruction}"...`);
-  rewriteBtn.disabled = true;
-
-  try {
-    const result = await post('/api/ai/rewrite', {
-      text: selectedText,
-      instruction,
-      model: modelSelect.value,
-    });
-
-    const rewritten = result.text || result.rewritten || '';
-    if (!rewritten) { addLog('No rewrite returned', true); return; }
-
-    const editor = getEditorFn();
-    if (editor) {
-      editor.chain()
-        .focus()
-        .deleteRange({ from: selectionFrom, to: selectionTo })
-        .insertContentAt(selectionFrom, rewritten)
-        .run();
-    }
-    addLog(`Done — replaced ${selectedText.length} chars`, false, true);
-  } catch (e) {
-    addLog(`Error: ${e.message}`, true);
-  } finally {
-    rewriteBtn.disabled = false;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Log
-// ---------------------------------------------------------------------------
-
-function addLog(msg, isError = false, isSuccess = false) {
+function addMessage(role, text, isSuccess = false, isError = false) {
+  if (!messagesEl) return null;
   const div = document.createElement('div');
-  div.className = 'ai-log-entry';
-  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  if (isError) {
-    div.innerHTML = `<span style="color:#f87171">${time} ${msg}</span>`;
-  } else if (isSuccess) {
-    div.innerHTML = `<span class="success">${time} ${msg}</span>`;
+  if (role === 'status') {
+    div.className = 'ai-msg status' +
+      (isSuccess ? ' success' : '') +
+      (isError ? ' error' : '');
   } else {
-    div.textContent = `${time} ${msg}`;
+    div.className = `ai-msg ${role}`;
   }
-  logEl.appendChild(div);
-  logEl.scrollTop = logEl.scrollHeight;
+  div.textContent = text;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
 }

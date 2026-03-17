@@ -18,6 +18,8 @@ Requires `.env` with: `NLM_PROXY_URL`, `NLM_PROXY_KEY`, `NLM_CLI_PATH`, `ZOTERO_
 - **NotebookLM**: queries via Tailscale HTTP proxy (`NLM_PROXY_URL/query`), listing via `nlm` CLI. Client in `server/mcp_client.py`
 - **Zotero**: via Zotero Web API v3 (`api.zotero.org`). Client in `server/zotero_client.py`
 - **Export**: pandoc subprocess for DOCX/PDF. Handler in `server/export.py`
+- **MiniMax via OpenClaw**: uses OpenClaw Gateway as OAuth proxy. Client in `server/openclaw_client.py`
+- **MiniMax Direct**: uses OAuth 2.0 directly. Client integrated in `server/routes/ai.py`
 
 ## File layout
 ```

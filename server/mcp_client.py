@@ -37,20 +37,20 @@ async def stop():
 
 async def list_notebooks() -> list[dict]:
     """List notebooks via the local nlm CLI."""
-    proc = await asyncio.create_subprocess_exec(
-        config.NLM_CLI_PATH, "notebook", "list", "--json",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        log.error("nlm CLI failed: %s", stderr.decode())
-        return []
     try:
+        proc = await asyncio.create_subprocess_exec(
+            config.NLM_CLI_PATH, "notebook", "list", "--json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            log.error("nlm CLI failed: %s", stderr.decode())
+            return []
         data = json.loads(stdout.decode())
         return data if isinstance(data, list) else data.get("notebooks", [])
-    except json.JSONDecodeError:
-        log.error("nlm CLI returned invalid JSON: %s", stdout.decode()[:200])
+    except Exception as e:
+        log.error("nlm CLI error: %s", e)
         return []
 
 
@@ -77,13 +77,20 @@ async def query_notebook(notebook_id: str, query: str, conversation_id: str | No
     payload = {"notebook_id": notebook_id, "question": query}
     if conversation_id:
         payload["conversation_id"] = conversation_id
-    resp = await client.post(
-        f"{config.NLM_PROXY_URL}/query",
-        json=payload,
-        headers={"x-api-key": config.NLM_PROXY_KEY},
-    )
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = await client.post(
+            f"{config.NLM_PROXY_URL}/query",
+            json=payload,
+            headers={"x-api-key": config.NLM_PROXY_KEY},
+        )
+        # Return the body regardless of status code — proxy includes answer even on 500
+        data = resp.json()
+        if not data.get("answer"):
+            data["answer"] = "Sorry, the notebook could not process this query."
+        return data
+    except Exception as e:
+        log.error("NLM proxy error: %s", e)
+        return {"answer": f"Notebook query failed: {str(e)}", "success": False}
 
 
 async def list_sources(notebook_id: str) -> list[dict]:

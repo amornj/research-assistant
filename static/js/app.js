@@ -15,68 +15,99 @@ const exportOptions = document.getElementById('export-options');
 const projectName = document.getElementById('project-name');
 
 async function boot() {
-  // Init editor
-  await editor.init();
+  console.log('App booting...');
+  try {
+    // Init editor (isolated — failure here doesn't block buttons/project UI)
+    try {
+      await editor.init();
+    } catch (err) {
+      console.error('Editor init failed:', err);
+    }
 
-  // Init notebook pane
-  notebook.init((text) => editor.insertText(text));
+    // Listen for block changes to trigger auto-save
+    document.addEventListener('blocks-changed', () => autoSave());
 
-  // Init references pane
-  refs.init((citation) => editor.insertCitation(citation));
+    // Init notebook pane — push creates a new block
+    notebook.init((text) => editor.addBlock(`<p>${text}</p>`));
 
-  // Init AI writing pane
-  aiWriting.init(() => editor.getEditor());
+    // Init references pane
+    refs.init((citation) => editor.insertCitation(citation));
 
-  // Init pane dividers
-  initDividers();
+    // Init AI writing pane
+    try {
+      aiWriting.init(
+        () => editor.getEditor(),
+        () => currentProject,
+        () => autoSave()
+      );
+    } catch (err) {
+      console.error('AI writing init failed:', err);
+    }
 
-  // Init tabs
-  initTabs();
+    // Init pane dividers
+    initDividers();
 
-  // Load project list
-  await refreshProjects();
+    // Init tabs
+    initTabs();
 
-  // Wire buttons
-  newProjectBtn.addEventListener('click', showNewProjectModal);
-  
-  exportBtnMain.addEventListener('click', (e) => {
-    e.stopPropagation();
-    exportOptions.classList.toggle('hidden');
-  });
+    // Load project list
+    await refreshProjects();
 
-  document.addEventListener('click', () => {
-    exportOptions.classList.add('hidden');
-  });
+    // Wire buttons
+    if (newProjectBtn) {
+        newProjectBtn.addEventListener('click', showNewProjectModal);
+    }
+    
+    if (exportBtnMain) {
+        exportBtnMain.addEventListener('click', (e) => {
+            e.stopPropagation();
+            exportOptions.classList.toggle('hidden');
+        });
+    }
 
-  exportOptions.querySelectorAll('button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      exportDoc(btn.dataset.format);
-      exportOptions.classList.add('hidden');
+    document.addEventListener('click', () => {
+        if (exportOptions) exportOptions.classList.add('hidden');
     });
-  });
 
-  projectSelect.addEventListener('change', () => loadProject(projectSelect.value));
+    if (exportOptions) {
+        exportOptions.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                exportDoc(btn.dataset.format);
+                exportOptions.classList.add('hidden');
+            });
+        });
+    }
 
-  // Restore last project
-  const lastPid = localStorage.getItem('last-project-id');
-  if (lastPid) {
-    // Small delay to ensure the projectSelect is populated by refreshProjects
-    setTimeout(() => {
-      projectSelect.value = lastPid;
-      if (projectSelect.value === lastPid) {
-        loadProject(lastPid);
-      }
-    }, 200);
+    if (projectSelect) {
+        projectSelect.addEventListener('change', () => loadProject(projectSelect.value));
+    }
+
+    // Restore last project
+    const lastPid = localStorage.getItem('last-project-id');
+    if (lastPid && projectSelect) {
+        // Small delay to ensure the projectSelect is populated by refreshProjects
+        setTimeout(() => {
+            projectSelect.value = lastPid;
+            if (projectSelect.value === lastPid) {
+                loadProject(lastPid);
+            }
+        }, 200);
+    }
+
+    // Auto-save every 10s
+    autoSaveTimer = setInterval(autoSave, 10000);
+    console.log('App boot complete');
+  } catch (err) {
+    console.error('App boot failed:', err);
   }
-
-  // Auto-save every 10s
-  autoSaveTimer = setInterval(autoSave, 10000);
 }
 
 function initDividers() {
   // Vertical divider
   const vDivider = document.getElementById('pane-divider');
   const main = document.querySelector('.main');
+  if (!vDivider || !main) return;
+
   let vDragging = false;
 
   vDivider.addEventListener('mousedown', (e) => {
@@ -91,6 +122,8 @@ function initDividers() {
   const hDivider = document.getElementById('pane-divider-h');
   const paneEditor = document.querySelector('.pane-editor');
   const paneBottom = document.querySelector('.pane-bottom');
+  if (!hDivider || !paneBottom) return;
+
   let hDragging = false;
 
   hDivider.addEventListener('mousedown', (e) => {
@@ -111,6 +144,7 @@ function initDividers() {
     
     if (hDragging) {
       const paneRight = document.querySelector('.pane-right');
+      if (!paneRight) return;
       const rect = paneRight.getBoundingClientRect();
       const offset = rect.bottom - e.pageY;
       if (offset > 100 && offset < rect.height - 100) {
@@ -136,62 +170,80 @@ function initTabs() {
       tabBtns.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       document.querySelectorAll('.tab-content').forEach(tc => tc.classList.add('hidden'));
-      document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
+      const target = document.getElementById(`tab-${btn.dataset.tab}`);
+      if (target) target.classList.remove('hidden');
     });
   });
 }
 
 async function refreshProjects() {
-  const projects = await get('/api/projects');
-  projectSelect.innerHTML = '<option value="">Select project...</option>';
-  for (const p of projects) {
-    const opt = document.createElement('option');
-    opt.value = p.id;
-    opt.textContent = p.name;
-    projectSelect.appendChild(opt);
+  if (!projectSelect) return;
+  try {
+    const projects = await get('/api/projects');
+    projectSelect.innerHTML = '<option value="">Select project...</option>';
+    for (const p of projects) {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        projectSelect.appendChild(opt);
+    }
+  } catch (err) {
+    console.error('Failed to refresh projects:', err);
   }
 }
 
 async function loadProject(pid) {
   if (!pid) return;
-  currentProject = await get(`/api/projects/${pid}`);
-  projectName.textContent = currentProject.name;
-  localStorage.setItem('last-project-id', pid);
+  try {
+    currentProject = await get(`/api/projects/${pid}`);
+    if (projectName) projectName.textContent = currentProject.name;
+    localStorage.setItem('last-project-id', pid);
 
-  // Load document
-  editor.setContent(currentProject.document_html || '');
+    // Load document — prefer blocks array, fall back to HTML migration
+    if (currentProject.blocks && currentProject.blocks.length > 0) {
+      editor.setBlocks(currentProject.blocks);
+    } else {
+      editor.setContent(currentProject.document_html || '');
+    }
 
-  // Set notebook
-  notebook.setNotebook(currentProject.notebook_id);
-  if (currentProject.chat_history) {
-    notebook.setHistory(currentProject.chat_history, currentProject.conversation_id);
-  }
+    // Refresh AI versions
+    aiWriting.refreshVersions();
 
-  // Load Zotero references
-  if (currentProject.zotero_collection) {
-    refs.loadCollection(currentProject.zotero_collection);
+    // Set notebook
+    notebook.setNotebook(currentProject.notebook_id);
+    if (currentProject.chat_history) {
+        notebook.setHistory(currentProject.chat_history, currentProject.conversation_id);
+    }
+
+    // Load Zotero references
+    if (currentProject.zotero_collection) {
+        refs.loadCollection(currentProject.zotero_collection);
+    }
+  } catch (err) {
+    console.error('Failed to load project:', err);
   }
 }
 
 async function autoSave() {
   if (!currentProject) return;
+  const blocks = editor.getBlocks();
   const html = editor.getHTML();
   const chatHistory = notebook.getHistory();
   const convId = notebook.getConversationId();
-  
-  // Basic check if changed
-  if (html === currentProject.document_html && 
-      JSON.stringify(chatHistory) === JSON.stringify(currentProject.chat_history)) return;
-      
+  const docVersions = currentProject.document_versions || [];
+
+  currentProject.blocks = blocks;
   currentProject.document_html = html;
   currentProject.chat_history = chatHistory;
   currentProject.conversation_id = convId;
-  
+
   try {
-    await put(`/api/projects/${currentProject.id}/document`, { 
-      html, 
+    await put(`/api/projects/${currentProject.id}/document`, {
+      html,
+      blocks,
       chat_history: chatHistory,
-      conversation_id: convId
+      conversation_id: convId,
+      document_versions: docVersions,
     });
   } catch (e) {
     console.warn('Auto-save failed:', e);
@@ -199,8 +251,9 @@ async function autoSave() {
 }
 
 async function exportDoc(format) {
-  if (!currentProject) return;
+  if (!currentProject) { alert('Select a project first.'); return; }
   const html = editor.getHTML();
+  if (!html || html === '<p></p>') { alert('Document is empty — nothing to export.'); return; }
   const filename = currentProject.name.replace(/\s+/g, '_');
   const ext = format === 'md' ? 'md' : (format === 'pdf' ? 'pdf' : 'docx');
   try {
@@ -247,14 +300,17 @@ function showNewProjectModal() {
       });
       overlay.remove();
       await refreshProjects();
-      projectSelect.value = project.id;
-      await loadProject(project.id);
+      if (projectSelect) {
+          projectSelect.value = project.id;
+          await loadProject(project.id);
+      }
     } catch (e) {
       alert(`Failed to create project: ${e.message}`);
     }
   });
 
-  overlay.querySelector('#modal-name').focus();
+  const nameInput = overlay.querySelector('#modal-name');
+  if (nameInput) nameInput.focus();
 }
 
 boot().catch(console.error);

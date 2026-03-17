@@ -77,21 +77,40 @@
           <button class="tab-btn" data-tab="zotero">Zotero</button>
         </div>
         <div class="tab-content" id="tab-ai-writing">
-          <div class="ai-writing-controls">
-            <label>Model</label>
-            <select id="ai-model-select">
-              <option value="minimax-2.5">MiniMax 2.5</option>
-            </select>
-            <button id="ai-oauth-btn" class="ai-oauth-btn">Connect</button>
-            <span id="ai-oauth-status" class="ai-oauth-status hidden">✓ Connected</span>
+          <!-- Agent + Model selectors -->
+          <div class="ai-controls-bar">
+            <div class="ai-ctrl-group">
+              <label>Agent</label>
+              <select id="ai-agent-select"><option value="">Loading...</option></select>
+            </div>
+            <div class="ai-ctrl-group">
+              <label>Model</label>
+              <select id="ai-model-select"><option value="">Default</option></select>
+            </div>
           </div>
-          <div class="ai-writing-hint">
-            <p>Right-click selected text in the editor to rewrite with AI.</p>
+          <!-- Doc version history -->
+          <div class="ai-version-bar hidden" id="ai-version-bar">
+            <span>Doc Versions:</span>
+            <div id="ai-version-list" class="version-list"></div>
           </div>
-          <div class="ai-writing-log" id="ai-writing-log"></div>
-          <div class="ai-chat-input-row">
-            <input id="ai-chat-input" type="text" placeholder="Ask AI to edit document...">
-            <button id="ai-chat-send">Send</button>
+          <!-- Chat / response area -->
+          <div class="ai-chat-messages" id="ai-chat-messages">
+            <div class="ai-welcome-msg">
+              <div>✏️ <strong>Write to Doc</strong> — AI edits your document directly</div>
+              <div>💬 <strong>Chat</strong> — ask anything, push responses to editor</div>
+              <div style="margin-top:6px;font-size:11px">Click ⠿ on any block for per-block AI rewrite</div>
+            </div>
+          </div>
+          <!-- Mode toggle + input -->
+          <div class="ai-input-area">
+            <div class="ai-mode-bar">
+              <button class="mode-btn active" id="mode-write-btn">✏️ Write to Doc</button>
+              <button class="mode-btn" id="mode-chat-btn">💬 Chat</button>
+            </div>
+            <div class="ai-input-row">
+              <input id="ai-chat-input" type="text" placeholder="Ask AI to edit document...">
+              <button id="ai-chat-send">Send</button>
+            </div>
           </div>
         </div>
         <div class="tab-content hidden" id="tab-zotero">
@@ -105,13 +124,6 @@
         </div>
       </div>
     </div>
-  </div>
-
-  <!-- Context menu for AI rewrite -->
-  <div class="context-menu hidden" id="ai-context-menu">
-    <div class="context-menu-header">AI Rewrite</div>
-    <input id="ai-rewrite-instruction" type="text" placeholder="Describe style change...">
-    <button id="ai-rewrite-go">Rewrite</button>
   </div>
 
   <script type="module" src="/js/app.js"></script>

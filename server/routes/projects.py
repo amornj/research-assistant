@@ -19,8 +19,10 @@ class ProjectCreate(BaseModel):
 
 class DocumentSave(BaseModel):
     html: str
+    blocks: list = []
     chat_history: list = []
     conversation_id: str | None = None
+    document_versions: list[str] = []
 
 
 def _project_path(pid: str) -> Path:
@@ -40,9 +42,12 @@ def _save(pid: str, data: dict):
 
 @router.post("")
 async def create_project(body: ProjectCreate):
-    # Find notebook by name via MCP
+    # Find notebook by name via MCP (best-effort — project is created even if lookup fails)
     from .. import mcp_client
-    notebooks = await mcp_client.list_notebooks()
+    try:
+        notebooks = await mcp_client.list_notebooks()
+    except Exception as e:
+        notebooks = []
     notebook_id = None
     if isinstance(notebooks, list):
         for nb in notebooks:
@@ -65,7 +70,9 @@ async def create_project(body: ProjectCreate):
         "notebook_id": notebook_id,
         "zotero_collection": body.zotero_collection,
         "document_html": "",
+        "blocks": [],
         "conversation_id": None,
+        "document_versions": [],
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     _save(pid, project)
@@ -92,7 +99,9 @@ async def get_project(pid: str):
 async def save_document(pid: str, body: DocumentSave):
     project = _load(pid)
     project["document_html"] = body.html
+    project["blocks"] = body.blocks
     project["chat_history"] = body.chat_history
     project["conversation_id"] = body.conversation_id
+    project["document_versions"] = body.document_versions
     _save(pid, project)
     return {"ok": True}
