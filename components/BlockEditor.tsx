@@ -14,6 +14,21 @@ function formatAuthors(creators?: { firstName?: string; lastName?: string; name?
     .join(', ') + (creators.length > 3 ? ' et al.' : '');
 }
 
+// Strip markdown syntax and [N] reference artifacts from HTML text nodes
+function cleanMarkdown(html: string): string {
+  return html.replace(/(<[^>]+>)|([^<]+)/g, (match, tag, text) => {
+    if (tag) return tag; // leave HTML tags untouched
+    return text
+      .replace(/\[\d+\]/g, '')           // [1] [2] … NotebookLM refs
+      .replace(/^#{1,6}\s*/gm, '')        // ## headings
+      .replace(/\*\*(.*?)\*\*/g, '$1')    // **bold**
+      .replace(/\*(.*?)\*/g, '$1')        // *italic*
+      .replace(/_(.*?)_/g, '$1')          // _italic_
+      .replace(/`(.*?)`/g, '$1')          // `code`
+      .replace(/\s{2,}/g, ' ');
+  });
+}
+
 function wordCount(html: string): number {
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
@@ -125,11 +140,12 @@ interface BlockContextMenuProps {
   onDisassemble: () => void;
   onDeleteBlock: () => void;
   onCheckCoherence: () => void;
+  onClean: () => void;
   canDisassemble: boolean;
 }
 
 function BlockContextMenu({
-  position, onClose, onOpenAI, onSaveVersion, onDisassemble, onDeleteBlock, onCheckCoherence, canDisassemble,
+  position, onClose, onOpenAI, onSaveVersion, onDisassemble, onDeleteBlock, onCheckCoherence, onClean, canDisassemble,
 }: BlockContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -156,6 +172,9 @@ function BlockContextMenu({
       </button>
       <button className={btnClass} onClick={onCheckCoherence}>
         🔎 Check Coherence
+      </button>
+      <button className={btnClass} onClick={onClean}>
+        🧹 Clean Markdown
       </button>
       <button className={btnClass} onClick={onSaveVersion}>
         💾 Save as New Version
@@ -725,6 +744,18 @@ export default function BlockEditor() {
     setContextMenu(null);
   };
 
+  const handleContextClean = () => {
+    if (!contextMenu) return;
+    const { blockId } = contextMenu;
+    const liveEl = document.querySelector(`[data-block-id="${blockId}"] .block-content`) as HTMLElement;
+    const rawHtml = liveEl?.innerHTML || '';
+    const cleaned = cleanMarkdown(rawHtml);
+    if (cleaned !== rawHtml) {
+      addBlockVersion(blockId, cleaned, 'Cleaned markdown');
+    }
+    setContextMenu(null);
+  };
+
   const handleContextOpenAI = () => {
     if (!contextMenu) return;
     setAiPopup({ blockId: contextMenu.blockId, pos: contextMenu.pos });
@@ -921,6 +952,7 @@ export default function BlockEditor() {
           onDisassemble={handleContextDisassemble}
           onDeleteBlock={handleContextDeleteBlock}
           onCheckCoherence={handleContextCheckCoherence}
+          onClean={handleContextClean}
           canDisassemble={canDisassemble}
         />
       )}
