@@ -18,6 +18,8 @@ export default function MainApp() {
   const [leftWidth, setLeftWidth] = useState(280);
   const [bottomHeight, setBottomHeight] = useState(280);
   const [leftTab, setLeftTab] = useState<'nlm' | 'outline'>('nlm');
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [bottomCollapsed, setBottomCollapsed] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingH = useRef(false);
   const isDraggingV = useRef(false);
@@ -153,7 +155,10 @@ export default function MainApp() {
       <TopBar onNewProject={() => setShowNewProject(true)} />
       <div ref={containerRef} className="flex flex-1 overflow-hidden">
         {/* Left pane: NLM / Outline toggle */}
-        <div style={{ width: leftWidth, minWidth: leftWidth }} className="flex flex-col overflow-hidden border-r border-[#2d3140]">
+        <div
+          style={{ width: leftCollapsed ? 0 : leftWidth, minWidth: leftCollapsed ? 0 : leftWidth }}
+          className="flex flex-col overflow-hidden border-r border-[#2d3140] transition-[width] duration-150"
+        >
           {/* Left pane tab switcher (#15) */}
           <div className="flex border-b border-[#2d3140] flex-shrink-0">
             <button
@@ -182,23 +187,41 @@ export default function MainApp() {
             {leftTab === 'outline' && <OutlinePanel />}
           </div>
         </div>
-        {/* Vertical resize handle */}
-        <div
-          className="resize-handle"
-          onMouseDown={handleVerticalDrag}
-        />
+        {/* Vertical resize handle + left-pane collapse toggle */}
+        <div className="relative flex-shrink-0 w-3 flex items-start justify-center bg-[#2d3140] hover:bg-[#3d4160] transition-colors group/vhandle">
+          {!leftCollapsed && (
+            <div className="absolute inset-0 cursor-col-resize" onMouseDown={handleVerticalDrag} />
+          )}
+          <button
+            onClick={() => setLeftCollapsed(v => !v)}
+            onMouseDown={e => e.stopPropagation()}
+            className="relative z-10 mt-4 w-3 h-7 flex items-center justify-center text-[#8b90a0] hover:text-white text-[10px] leading-none select-none"
+            title={leftCollapsed ? 'Expand panel' : 'Collapse panel'}
+          >
+            {leftCollapsed ? '›' : '‹'}
+          </button>
+        </div>
         {/* Right: Editor + Bottom Pane */}
         <div className="flex flex-col flex-1 overflow-hidden">
           <EditorToolbar />
-          <div className="flex-1 overflow-hidden" style={{ height: `calc(100% - ${bottomHeight}px - 4px - 40px)` }}>
+          <div className="flex-1 overflow-hidden" style={{ height: `calc(100% - ${bottomCollapsed ? 0 : bottomHeight}px - 20px - 40px)` }}>
             <BlockEditor />
           </div>
-          {/* Horizontal resize handle */}
-          <div
-            className="h-1 cursor-row-resize bg-[#2d3140] hover:bg-[#6c8aff] transition-colors flex-shrink-0"
-            onMouseDown={handleHorizontalDrag}
-          />
-          <div style={{ height: bottomHeight, minHeight: bottomHeight }} className="flex-shrink-0 overflow-hidden border-t border-[#2d3140]">
+          {/* Horizontal resize handle + bottom-pane collapse toggle */}
+          <div className="relative flex-shrink-0 h-5 flex items-center justify-center bg-[#2d3140] hover:bg-[#3d4160] transition-colors group/hhandle">
+            {!bottomCollapsed && (
+              <div className="absolute inset-0 cursor-row-resize" onMouseDown={handleHorizontalDrag} />
+            )}
+            <button
+              onClick={() => setBottomCollapsed(v => !v)}
+              onMouseDown={e => e.stopPropagation()}
+              className="relative z-10 h-5 w-10 flex items-center justify-center text-[#8b90a0] hover:text-white text-[10px] leading-none select-none"
+              title={bottomCollapsed ? 'Expand panel' : 'Collapse panel'}
+            >
+              {bottomCollapsed ? '∧' : '∨'}
+            </button>
+          </div>
+          <div style={{ height: bottomCollapsed ? 0 : bottomHeight, minHeight: bottomCollapsed ? 0 : bottomHeight }} className="flex-shrink-0 overflow-hidden border-t border-[#2d3140] transition-[height] duration-150">
             <BottomPane />
           </div>
         </div>
