@@ -144,7 +144,7 @@ html, body {
   border-radius: 6px;
 }
 
-/* ── Light theme ────────────────────────────────────────────────────────── */
+/* ── Light theme CSS variables (used by .block-content, .version-pill, etc) */
 [data-theme="light"] {
   --bg: #f4f5f8;
   --surface: #ffffff;
@@ -154,38 +154,4 @@ html, body {
   --text-dim: #5a6070;
   --accent: #4f6ef7;
   --accent-hover: #3a5ae0;
-}
-
-/* Background overrides */
-[data-theme="light"] .bg-\[\#0f1117\] { background-color: #f4f5f8; }
-[data-theme="light"] .bg-\[\#1a1d27\] { background-color: #ffffff; }
-[data-theme="light"] .bg-\[\#232733\] { background-color: #eef0f6; }
-[data-theme="light"] .bg-\[\#2d3140\] { background-color: #d8dce8; }
-[data-theme="light"] .hover\:bg-\[\#232733\]:hover { background-color: #e4e7f2; }
-[data-theme="light"] .hover\:bg-\[\#2d3140\]:hover { background-color: #d0d4e0; }
-[data-theme="light"] .hover\:bg-\[\#3d4160\]:hover { background-color: #c8ccd8; }
-
-/* Text overrides */
-[data-theme="light"] .text-\[\#e1e4ed\] { color: #1a1d27; }
-[data-theme="light"] .text-\[\#c8ccd8\] { color: #2d3140; }
-[data-theme="light"] .text-\[\#8b90a0\] { color: #5a6070; }
-
-/* Border overrides */
-[data-theme="light"] .border-\[\#2d3140\] { border-color: #d0d4e0; }
-
-/* Select / option */
-[data-theme="light"] select,
-[data-theme="light"] option {
-  background-color: #eef0f6;
-  color: #1a1d27;
-}
-
-/* Inputs */
-[data-theme="light"] input,
-[data-theme="light"] textarea {
-  color: #1a1d27;
-}
-
-html, body {
-  transition: background-color 0.2s, color 0.2s;
 }

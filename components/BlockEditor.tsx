@@ -164,10 +164,12 @@ interface BlockContextMenuProps {
   onCheckCoherence: () => void;
   onClean: () => void;
   canDisassemble: boolean;
+  blockHasCitations: boolean;
+  onFindReferences: () => void;
 }
 
 function BlockContextMenu({
-  position, onClose, onOpenAI, onSaveVersion, onDisassemble, onDeleteBlock, onCheckCoherence, onClean, canDisassemble,
+  position, onClose, onOpenAI, onSaveVersion, onDisassemble, onDeleteBlock, onCheckCoherence, onClean, canDisassemble, blockHasCitations, onFindReferences,
 }: BlockContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -198,6 +200,11 @@ function BlockContextMenu({
       <button className={btnClass} onClick={onClean}>
         🧹 Clean Markdown
       </button>
+      {!blockHasCitations && (
+        <button className={btnClass} onClick={onFindReferences}>
+          🔍 Find References
+        </button>
+      )}
       <button className={btnClass} onClick={onSaveVersion}>
         💾 Save as New Version
       </button>
@@ -534,6 +541,10 @@ export default function BlockEditor() {
   const [compareMode, setCompareMode] = useState<{ blockId: string; versionIndex: number } | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [animatedBlockId, setAnimatedBlockId] = useState<string | null>(null);
+  const [pendingBatchDelete, setPendingBatchDelete] = useState(false);
+  const [batchRewriteMode, setBatchRewriteMode] = useState(false);
+  const [batchInstruction, setBatchInstruction] = useState('');
+  const [batchLoading, setBatchLoading] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pendingFocusId = useRef<string | null>(null);
 
@@ -600,6 +611,15 @@ export default function BlockEditor() {
       return;
     }
     if (e.key === 'Enter' && !e.shiftKey) {
+      // If cursor is inside a list item, let the browser handle it (creates new <li>)
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        let node: Node | null = sel.getRangeAt(0).startContainer;
+        while (node && node !== (e.currentTarget as Node)) {
+          if ((node as Element).tagName === 'LI') return;
+          node = node.parentNode;
+        }
+      }
       e.preventDefault();
       updateBlock(id, html);
       const newBlock = addBlock('', id);
@@ -753,6 +773,49 @@ export default function BlockEditor() {
     setCmdMode(false);
   };
 
+  const handleBatchDelete = () => setPendingBatchDelete(true);
+  const confirmBatchDelete = () => {
+    Array.from(selectedBlockIds).forEach(id => deleteBlock(id));
+    setSelectedBlockIds(new Set());
+    setCmdMode(false);
+    setPendingBatchDelete(false);
+  };
+  const handleBatchCleanup = () => {
+    Array.from(selectedBlockIds).forEach(id => {
+      const liveEl = document.querySelector(`[data-block-id="${id}"] .block-content`) as HTMLElement;
+      const rawHtml = liveEl?.innerHTML || '';
+      const cleaned = cleanMarkdown(rawHtml);
+      if (cleaned !== rawHtml) addBlockVersion(id, cleaned, 'Cleaned markdown');
+    });
+    triggerComplete(Array.from(selectedBlockIds)[0] || '');
+    setSelectedBlockIds(new Set());
+    setCmdMode(false);
+  };
+  const handleBatchRewrite = async () => {
+    if (!batchInstruction.trim() || batchLoading) return;
+    setBatchLoading(true);
+    for (const id of Array.from(selectedBlockIds)) {
+      const liveEl = document.querySelector(`[data-block-id="${id}"] .block-content`) as HTMLElement;
+      const text = liveEl?.textContent || '';
+      if (!text.trim()) continue;
+      try {
+        const res = await fetch('/api/ai/rewrite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, instruction: batchInstruction, model: 'anthropic/claude-sonnet-4-20250514' }),
+        });
+        const data = await res.json();
+        if (data.text) addBlockVersion(id, `<p>${data.text}</p>`, batchInstruction);
+      } catch { /* skip */ }
+    }
+    playCompletionSound();
+    setBatchLoading(false);
+    setBatchInstruction('');
+    setBatchRewriteMode(false);
+    setSelectedBlockIds(new Set());
+    setCmdMode(false);
+  };
+
   // Context menu actions
   const handleContextSaveVersion = () => {
     if (!contextMenu) return;
@@ -787,6 +850,21 @@ export default function BlockEditor() {
     if (cleaned !== rawHtml) {
       addBlockVersion(blockId, cleaned, 'Cleaned markdown');
       triggerComplete(blockId);
+    }
+    setContextMenu(null);
+  };
+
+  const handleContextFindReferences = () => {
+    if (!contextMenu) return;
+    const { blockId } = contextMenu;
+    const liveEl = document.querySelector(`[data-block-id="${blockId}"] .block-content`) as HTMLElement;
+    const text = liveEl?.textContent || '';
+    const query = text.trim().substring(0, 80);
+    if (query) {
+      const event = new CustomEvent('zotero-search', { detail: { query } });
+      window.dispatchEvent(event);
+      const event2 = new CustomEvent('bottom-tab-change', { detail: { tab: 'zotero' } });
+      window.dispatchEvent(event2);
     }
     setContextMenu(null);
   };
@@ -894,6 +972,9 @@ export default function BlockEditor() {
       })()
     : '';
   const canDisassemble = /<br\s*\/?>\s*<br\s*\/?>/i.test(contextMenuHtml);
+  const contextMenuBlockHasCitations = contextMenuBlock
+    ? (contextMenuBlock.citationIds || []).length > 0
+    : false;
 
   // Context blocks for AI popup (#4)
   const getAiPopupContext = () => {
@@ -1046,6 +1127,8 @@ export default function BlockEditor() {
               onCheckCoherence={handleContextCheckCoherence}
               onClean={handleContextClean}
               canDisassemble={canDisassemble}
+              blockHasCitations={contextMenuBlockHasCitations}
+              onFindReferences={handleContextFindReferences}
             />
           )}
           {aiPopup && (
@@ -1078,15 +1161,57 @@ export default function BlockEditor() {
     >
       {/* Cmd-mode hint bar */}
       {cmdMode && (
-        <div className="sticky top-0 z-10 bg-[#6c8aff]/10 border-b border-[#6c8aff]/30 px-4 py-1.5 flex items-center gap-3 text-xs text-[#6c8aff]">
-          <span>⌘ Merge mode — click block handles or checkboxes to select</span>
-          {selectedBlockIds.size >= 2 && (
-            <button
-              onClick={handleMergeSelected}
-              className="ml-auto px-3 py-1 bg-[#6c8aff] text-white rounded font-medium hover:bg-[#5a78f0] transition-colors"
-            >
-              Merge {selectedBlockIds.size} blocks
-            </button>
+        <div className="sticky top-0 z-10 bg-[#6c8aff]/10 border-b border-[#6c8aff]/30 px-4 py-1.5 flex flex-col gap-1">
+          <div className="flex items-center gap-2 text-xs text-[#6c8aff]">
+            <span>⌘ Select mode</span>
+            {selectedBlockIds.size > 0 && (
+              <span className="text-[#8b90a0]">{selectedBlockIds.size} selected</span>
+            )}
+            {selectedBlockIds.size >= 2 && (
+              <button onClick={handleMergeSelected} className="px-2 py-0.5 bg-[#6c8aff] text-white rounded font-medium hover:bg-[#5a78f0] transition-colors">
+                Merge
+              </button>
+            )}
+            {selectedBlockIds.size >= 1 && (
+              <>
+                <button onClick={handleBatchCleanup} className="px-2 py-0.5 bg-[#232733] hover:bg-[#2d3140] text-[#8b90a0] hover:text-[#e1e4ed] border border-[#2d3140] rounded transition-colors">
+                  🧹 Clean
+                </button>
+                <button onClick={() => setBatchRewriteMode(v => !v)} className="px-2 py-0.5 bg-[#232733] hover:bg-[#2d3140] text-[#8b90a0] hover:text-[#e1e4ed] border border-[#2d3140] rounded transition-colors">
+                  ✨ Rewrite
+                </button>
+                <button onClick={handleBatchDelete} className="px-2 py-0.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 rounded transition-colors">
+                  🗑️ Delete
+                </button>
+              </>
+            )}
+          </div>
+          {batchRewriteMode && (
+            <div className="flex gap-1">
+              <input
+                type="text"
+                value={batchInstruction}
+                onChange={e => setBatchInstruction(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleBatchRewrite()}
+                placeholder="Rewrite instruction for all selected blocks..."
+                className="flex-1 bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs focus:outline-none focus:border-[#6c8aff]"
+                autoFocus
+              />
+              <button
+                onClick={handleBatchRewrite}
+                disabled={batchLoading || !batchInstruction.trim()}
+                className="px-2 py-1 bg-[#6c8aff] hover:bg-[#5a78f0] text-white text-xs rounded disabled:opacity-50 transition-colors"
+              >
+                {batchLoading ? '...' : '→'}
+              </button>
+            </div>
+          )}
+          {pendingBatchDelete && (
+            <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded px-3 py-1.5 text-xs">
+              <span className="text-red-300">Delete {selectedBlockIds.size} blocks permanently?</span>
+              <button onClick={confirmBatchDelete} className="px-2 py-0.5 bg-red-500 hover:bg-red-600 text-white rounded transition-colors">Delete</button>
+              <button onClick={() => setPendingBatchDelete(false)} className="px-2 py-0.5 bg-[#232733] hover:bg-[#2d3140] text-[#8b90a0] rounded transition-colors">Cancel</button>
+            </div>
           )}
         </div>
       )}
@@ -1160,6 +1285,8 @@ export default function BlockEditor() {
           onCheckCoherence={handleContextCheckCoherence}
           onClean={handleContextClean}
           canDisassemble={canDisassemble}
+          blockHasCitations={contextMenuBlockHasCitations}
+          onFindReferences={handleContextFindReferences}
         />
       )}
       {/* AI popup */}

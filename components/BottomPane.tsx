@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import AIWritingTab from './AIWritingTab';
 import ZoteroTab from './ZoteroTab';
-import NotebookSourcePanel from './NotebookSourcePanel';
+import NotebookSwitcher from './NotebookSourcePanel';
 
 export default function BottomPane() {
   const [activeTab, setActiveTab] = useState<'ai' | 'zotero' | 'sources'>('ai');
@@ -58,7 +58,7 @@ export default function BottomPane() {
               : 'border-transparent text-[#8b90a0] hover:text-[#e1e4ed]'
           }`}
         >
-          NLM Sources
+          Notebooks
         </button>
       </div>
       <div className="flex-1 overflow-hidden relative">
@@ -69,7 +69,7 @@ export default function BottomPane() {
           <ZoteroTab />
         </div>
         <div style={{ display: activeTab === 'sources' ? 'flex' : 'none' }} className="flex-col h-full">
-          <NotebookSourcePanel />
+          <NotebookSwitcher />
         </div>
       </div>
     </div>

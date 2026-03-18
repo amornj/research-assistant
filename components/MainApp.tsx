@@ -20,10 +20,7 @@ export default function MainApp() {
   const [leftTab, setLeftTab] = useState<'nlm' | 'outline'>('nlm');
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [bottomCollapsed, setBottomCollapsed] = useState(false);
-  const [theme, setTheme] = useState<'dark' | 'light' | 'system'>(() => {
-    if (typeof window === 'undefined') return 'dark';
-    return (localStorage.getItem('ra-theme') as 'dark' | 'light' | 'system') || 'dark';
-  });
+  const [theme, setTheme] = useState<'dark' | 'light' | 'system'>('dark');
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingH = useRef(false);
   const isDraggingV = useRef(false);
@@ -32,14 +29,41 @@ export default function MainApp() {
     loadProjects();
   }, []);
 
-  // Theme management
+  // Load persisted theme on client mount (separate from the apply effect to avoid SSR mismatch)
   useEffect(() => {
+    const stored = localStorage.getItem('ra-theme') as 'dark' | 'light' | 'system' | null;
+    if (stored && stored !== 'dark') setTheme(stored);
+  }, []);
+
+  // Theme management — JS-injected styles are more reliable than CSS class overrides for Tailwind arbitrary values
+  useEffect(() => {
+    const LIGHT_CSS = `
+      html, body { background-color: #f4f5f8 !important; color: #1a1d27 !important; }
+      .bg-\\[\\#0f1117\\] { background-color: #f4f5f8 !important; }
+      .bg-\\[\\#1a1d27\\] { background-color: #ffffff !important; }
+      .bg-\\[\\#232733\\] { background-color: #eef0f6 !important; }
+      .bg-\\[\\#2d3140\\] { background-color: #d8dce8 !important; }
+      .hover\\:bg-\\[\\#232733\\]:hover { background-color: #e4e7f0 !important; }
+      .hover\\:bg-\\[\\#2d3140\\]:hover { background-color: #d0d4e0 !important; }
+      .hover\\:bg-\\[\\#3d4160\\]:hover { background-color: #c8ccd8 !important; }
+      .text-\\[\\#e1e4ed\\] { color: #1a1d27 !important; }
+      .text-\\[\\#c8ccd8\\] { color: #2d3140 !important; }
+      .text-\\[\\#8b90a0\\] { color: #5a6070 !important; }
+      .border-\\[\\#2d3140\\] { border-color: #d0d4e0 !important; }
+      select, option { background-color: #eef0f6 !important; color: #1a1d27 !important; }
+      input[type="text"], textarea { color: #1a1d27 !important; }
+    `;
     const applyTheme = (t: 'dark' | 'light' | 'system') => {
-      if (t === 'system') {
-        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-      } else {
-        document.documentElement.setAttribute('data-theme', t);
+      const resolved = t === 'system'
+        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : t;
+      document.documentElement.setAttribute('data-theme', resolved);
+      document.getElementById('ra-theme-style')?.remove();
+      if (resolved === 'light') {
+        const style = document.createElement('style');
+        style.id = 'ra-theme-style';
+        style.textContent = LIGHT_CSS;
+        document.head.appendChild(style);
       }
     };
     applyTheme(theme);

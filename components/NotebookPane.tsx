@@ -79,11 +79,6 @@ export default function NotebookPane() {
     }
   };
 
-  const handleInsert = (content: string) => {
-    const fn = (window as any).__insertToEditor;
-    if (fn) fn(`<p>${content}</p>`);
-  };
-
   // #11 — Capture as block
   const handleCapture = (content: string, msgIndex: number) => {
     const insertAfter = (window as any).__editorFocusedBlockId as string | null;
@@ -161,12 +156,6 @@ export default function NotebookPane() {
             <div className="text-[13px] leading-relaxed whitespace-pre-wrap">{msg.content}</div>
             {msg.role === 'assistant' && msg.showInsert && (
               <div className="mt-1.5 flex flex-wrap gap-1">
-                <button
-                  onClick={() => handleInsert(msg.content)}
-                  className="text-xs text-[#6c8aff] hover:text-[#5a78f0] transition-colors"
-                >
-                  ↓ Insert to editor
-                </button>
                 <button
                   onClick={() => handleCapture(msg.content, i)}
                   className="px-2 py-0.5 text-xs bg-[#232733] hover:bg-[#2d3140] border border-[#2d3140] rounded text-[#8b90a0] hover:text-[#e1e4ed] transition-colors"
