@@ -255,6 +255,7 @@ interface BlockItemProps {
 
 function BlockItem({
   block,
+  blockIndex,
   isFirst,
   onFocus,
   onBlur,
@@ -268,6 +269,7 @@ function BlockItem({
   dropPosition,
   onShowContextMenu,
   onSwitchVersion,
+  onDeleteVersion,
   focusedId,
   citationMap,
   projectCitations,
@@ -282,6 +284,7 @@ function BlockItem({
   const prevActiveVersion = useRef(block.activeVersion);
   const prevBlockId = useRef(block.id);
   const [hovered, setHovered] = useState(false);
+  const [pendingDeleteVersion, setPendingDeleteVersion] = useState<number | null>(null);
 
   // Set innerHTML on mount or when version/block changes
   useEffect(() => {
@@ -324,6 +327,12 @@ function BlockItem({
 
   return (
     <div className="group relative" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      {/* Block number — shown on hover, floats left of the block rectangle */}
+      <div
+        className={`absolute -left-7 top-1/2 -translate-y-1/2 text-[11px] font-mono text-[#8b90a0]/40 select-none transition-opacity pointer-events-none ${hovered ? 'opacity-100' : 'opacity-0'}`}
+      >
+        {blockIndex + 1}
+      </div>
       {/* Drop indicator before */}
       <div className={`drop-indicator ${isDropBefore && !cmdMode ? 'active' : ''}`} />
       <div
@@ -394,16 +403,41 @@ function BlockItem({
           )}
           {/* Version pills */}
           {block.versions.length > 1 && (
-            <div className="flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity flex-wrap items-center">
               {block.versions.map((v, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => onSwitchVersion(block.id, idx)}
-                  className={`version-pill ${idx === block.activeVersion ? 'active' : ''}`}
-                  title={v.instruction || `Version ${idx + 1}`}
-                >
-                  v{idx + 1}
-                </button>
+                <div key={idx} className="relative">
+                  <button
+                    onClick={() => onSwitchVersion(block.id, idx)}
+                    onContextMenu={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (block.versions.length > 1) setPendingDeleteVersion(idx);
+                    }}
+                    className={`version-pill ${idx === block.activeVersion ? 'active' : ''}`}
+                    title={`${v.instruction || `Version ${idx + 1}`} — right-click to delete`}
+                  >
+                    v{idx + 1}
+                  </button>
+                  {pendingDeleteVersion === idx && (
+                    <div className="absolute bottom-full left-0 mb-1 bg-[#1a1d27] border border-red-500/40 rounded shadow-xl p-2 z-50 whitespace-nowrap">
+                      <div className="text-[11px] text-[#e1e4ed] mb-1.5">Delete v{idx + 1}?</div>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => { setPendingDeleteVersion(null); onDeleteVersion(block.id, idx); }}
+                          className="px-2 py-0.5 text-[11px] bg-red-500 hover:bg-red-600 text-white rounded transition-colors"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          onClick={() => setPendingDeleteVersion(null)}
+                          className="px-2 py-0.5 text-[11px] bg-[#232733] hover:bg-[#2d3140] text-[#8b90a0] rounded transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           )}
@@ -432,6 +466,7 @@ export default function BlockEditor() {
     splitBlock,
     addBlockVersion,
     switchBlockVersion,
+    deleteBlockVersion,
     setFocusedBlockId,
     removeCitationFromBlock,
   } = useStore();
@@ -497,6 +532,20 @@ export default function BlockEditor() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, id: string, html: string) => {
+    // Cmd+Shift+Up/Down — move block
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      updateBlock(id, html);
+      const blockIdx = blocks.findIndex(b => b.id === id);
+      if (e.key === 'ArrowUp' && blockIdx > 0) {
+        moveBlock(id, blocks[blockIdx - 1].id, 'before');
+        pendingFocusId.current = id;
+      } else if (e.key === 'ArrowDown' && blockIdx < blocks.length - 1) {
+        moveBlock(id, blocks[blockIdx + 1].id, 'after');
+        pendingFocusId.current = id;
+      }
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       updateBlock(id, html);
@@ -822,6 +871,7 @@ export default function BlockEditor() {
           <div key={block.id} data-block-id={block.id}>
             <BlockItem
               block={block}
+              blockIndex={idx}
               isFirst={idx === 0}
               onFocus={handleFocus}
               onBlur={handleBlur}
@@ -835,6 +885,7 @@ export default function BlockEditor() {
               dropPosition={dropPosition}
               onShowContextMenu={handleShowContextMenu}
               onSwitchVersion={switchBlockVersion}
+              onDeleteVersion={deleteBlockVersion}
               focusedId={focusedId}
               citationMap={citationMap}
               projectCitations={projectCitations}
