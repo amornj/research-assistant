@@ -50,6 +50,7 @@ interface Store {
   moveBlock: (fromId: string, toId: string, position: 'before' | 'after') => void;
   addBlockVersion: (id: string, html: string, instruction: string) => void;
   switchBlockVersion: (id: string, versionIndex: number) => void;
+  deleteBlockVersion: (id: string, versionIndex: number) => void;
   mergeBlocks: (blockIds: string[]) => void;
   splitBlock: (blockId: string, liveHtml?: string) => void;
   // Citation actions
@@ -259,6 +260,27 @@ export const useStore = create<Store>((set, get) => ({
       const blocks = p.blocks.map(b => {
         if (b.id !== id) return b;
         return { ...b, activeVersion: versionIndex };
+      });
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  deleteBlockVersion: (id, versionIndex) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.map(b => {
+        if (b.id !== id) return b;
+        if (b.versions.length <= 1) return b; // can't delete the only version
+        const versions = b.versions.filter((_, i) => i !== versionIndex);
+        let activeVersion = b.activeVersion;
+        if (activeVersion >= versions.length) activeVersion = versions.length - 1;
+        else if (activeVersion > versionIndex) activeVersion--;
+        return { ...b, versions, activeVersion };
       });
       return { ...p, blocks };
     });

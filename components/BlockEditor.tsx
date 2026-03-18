@@ -33,6 +33,7 @@ function CitationBadge({
   onRemove: (blockId: string, citationId: string) => void;
 }) {
   const [showTooltip, setShowTooltip] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState(false);
   const authors = formatAuthors(citation.data.creators);
   const year = citation.data.date ? citation.data.date.substring(0, 4) : '';
   const abstract = citation.data.abstractNote
@@ -45,7 +46,8 @@ function CitationBadge({
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    onRemove(blockId, citation.id);
+    setShowTooltip(false);
+    setPendingRemove(true);
   };
 
   const doiVerifiedIcon = citation.doiVerified === true ? ' ✓' : citation.doiVerified === false ? ' ✗' : '';
@@ -55,12 +57,31 @@ function CitationBadge({
     <span className="relative inline-block" onContextMenu={handleContextMenu}>
       <sup
         className="text-[10px] bg-[#6c8aff]/20 text-[#6c8aff] px-1 py-0.5 rounded cursor-pointer hover:bg-[#6c8aff]/40 transition-colors select-none"
-        onMouseEnter={() => setShowTooltip(true)}
+        onMouseEnter={() => { if (!pendingRemove) setShowTooltip(true); }}
         onMouseLeave={() => setShowTooltip(false)}
         title="Right-click to remove"
       >
         [{num}]
       </sup>
+      {pendingRemove && (
+        <div className="absolute bottom-full left-0 mb-1 bg-[#1a1d27] border border-red-500/40 rounded shadow-xl p-2 z-50 whitespace-nowrap">
+          <div className="text-[11px] text-[#e1e4ed] mb-1.5">Remove citation [{num}]?</div>
+          <div className="flex gap-1">
+            <button
+              onClick={() => { setPendingRemove(false); onRemove(blockId, citation.id); }}
+              className="px-2 py-0.5 text-[11px] bg-red-500 hover:bg-red-600 text-white rounded transition-colors"
+            >
+              Remove
+            </button>
+            <button
+              onClick={() => setPendingRemove(false)}
+              className="px-2 py-0.5 text-[11px] bg-[#232733] hover:bg-[#2d3140] text-[#8b90a0] rounded transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {showTooltip && (
         <div
           className="absolute bottom-full left-0 mb-1 w-72 bg-[#1a1d27] border border-[#2d3140] rounded shadow-xl p-3 z-50 text-xs"
@@ -207,6 +228,7 @@ function PastePopup({ detected, onLookup, onDismiss }: PastePopupProps) {
 
 interface BlockItemProps {
   block: Block;
+  blockIndex: number;
   isFirst: boolean;
   onFocus: (id: string) => void;
   onBlur: (id: string, html: string) => void;
@@ -220,6 +242,7 @@ interface BlockItemProps {
   dropPosition: 'before' | 'after' | null;
   onShowContextMenu: (blockId: string, pos: { top: number; left: number }) => void;
   onSwitchVersion: (id: string, idx: number) => void;
+  onDeleteVersion: (id: string, versionIndex: number) => void;
   focusedId: string | null;
   citationMap: Map<string, number>;
   projectCitations: Citation[];
