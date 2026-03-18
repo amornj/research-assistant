@@ -14,19 +14,40 @@ function formatAuthors(creators?: { firstName?: string; lastName?: string; name?
     .join(', ') + (creators.length > 3 ? ' et al.' : '');
 }
 
-// Strip markdown syntax and [N] reference artifacts from HTML text nodes
+// Strip markdown syntax and [N] reference artifacts from HTML.
+// Uses a DOM TreeWalker so it only touches text nodes — HTML tags,
+// attributes, and structure are never modified.
 function cleanMarkdown(html: string): string {
-  return html.replace(/(<[^>]+>)|([^<]+)/g, (match, tag, text) => {
-    if (tag) return tag; // leave HTML tags untouched
-    return text
-      .replace(/\[\d+\]/g, '')           // [1] [2] … NotebookLM refs
-      .replace(/^#{1,6}\s*/gm, '')        // ## headings
-      .replace(/\*\*(.*?)\*\*/g, '$1')    // **bold**
-      .replace(/\*(.*?)\*/g, '$1')        // *italic*
-      .replace(/_(.*?)_/g, '$1')          // _italic_
-      .replace(/`(.*?)`/g, '$1')          // `code`
-      .replace(/\s{2,}/g, ' ');
-  });
+  if (typeof document === 'undefined') return html;
+  const div = document.createElement('div');
+  div.innerHTML = html;
+
+  const walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let n = walker.nextNode();
+  while (n) { nodes.push(n as Text); n = walker.nextNode(); }
+
+  for (const node of nodes) {
+    let t = node.textContent || '';
+    t = t
+      // NotebookLM reference artifacts — all variants:
+      //   [1]  [1,2]  [1, 2, 3]  [1-3]  [1, 2-4]
+      .replace(/\[\d+(?:[,\s\u2013\u2014\-]*\d+)*\]/g, '')
+      // Markdown heading markers at the start of any line
+      .replace(/^#{1,6}\s*/gm, '')
+      // **bold** and *italic*
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      // _italic_
+      .replace(/_(.*?)_/g, '$1')
+      // `code`
+      .replace(/`(.*?)`/g, '$1')
+      // Collapse runs of spaces/tabs (preserve newlines)
+      .replace(/[ \t]{2,}/g, ' ');
+    node.textContent = t;
+  }
+
+  return div.innerHTML;
 }
 
 function wordCount(html: string): number {
