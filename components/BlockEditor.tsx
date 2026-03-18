@@ -14,6 +14,13 @@ function formatAuthors(creators?: { firstName?: string; lastName?: string; name?
     .join(', ') + (creators.length > 3 ? ' et al.' : '');
 }
 
+function wordCount(html: string): number {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const text = tmp.textContent || '';
+  return text.trim() ? text.trim().split(/\s+/).length : 0;
+}
+
 function CitationBadge({
   num,
   citation,
@@ -41,6 +48,9 @@ function CitationBadge({
     onRemove(blockId, citation.id);
   };
 
+  const doiVerifiedIcon = citation.doiVerified === true ? ' ✓' : citation.doiVerified === false ? ' ✗' : '';
+  const doiVerifiedColor = citation.doiVerified === true ? 'text-green-400' : citation.doiVerified === false ? 'text-red-400' : 'text-[#8b90a0]';
+
   return (
     <span className="relative inline-block" onContextMenu={handleContextMenu}>
       <sup
@@ -65,15 +75,17 @@ function CitationBadge({
             <div className="text-[#8b90a0] italic">{citation.data.publicationTitle}</div>
           )}
           {abstract && <div className="text-[#8b90a0] mt-1 leading-relaxed">{abstract}</div>}
+          {citation.annotationNote && (
+            <div className="text-[#6c8aff] mt-1 italic border-t border-[#2d3140] pt-1">{citation.annotationNote}</div>
+          )}
           {doiUrl && (
             <a
               href={doiUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[#6c8aff] mt-1 block hover:underline cursor-pointer"
-              onDoubleClick={(e) => { e.stopPropagation(); window.open(doiUrl, '_blank'); }}
+              className={`mt-1 block hover:underline cursor-pointer ${doiVerifiedColor}`}
             >
-              DOI: {citation.data.DOI || doiUrl}
+              DOI: {citation.data.DOI || doiUrl}{doiVerifiedIcon}
             </a>
           )}
         </div>
@@ -91,11 +103,12 @@ interface BlockContextMenuProps {
   onSaveVersion: () => void;
   onDisassemble: () => void;
   onDeleteBlock: () => void;
+  onCheckCoherence: () => void;
   canDisassemble: boolean;
 }
 
 function BlockContextMenu({
-  position, onClose, onOpenAI, onSaveVersion, onDisassemble, onDeleteBlock, canDisassemble,
+  position, onClose, onOpenAI, onSaveVersion, onDisassemble, onDeleteBlock, onCheckCoherence, canDisassemble,
 }: BlockContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -114,11 +127,14 @@ function BlockContextMenu({
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 bg-[#1a1d27] border border-[#2d3140] rounded shadow-xl py-1 min-w-[170px]"
+      className="fixed z-50 bg-[#1a1d27] border border-[#2d3140] rounded shadow-xl py-1 min-w-[180px]"
       style={{ top: position.top, left: position.left }}
     >
       <button className={btnClass} onClick={onOpenAI}>
         ✨ AI Rewrite
+      </button>
+      <button className={btnClass} onClick={onCheckCoherence}>
+        🔎 Check Coherence
       </button>
       <button className={btnClass} onClick={onSaveVersion}>
         💾 Save as New Version
@@ -136,12 +152,66 @@ function BlockContextMenu({
   );
 }
 
+interface CoherenceToastProps {
+  message: string;
+  onClose: () => void;
+}
+
+function CoherenceToast({ message, onClose }: CoherenceToastProps) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 15000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50 max-w-sm bg-[#1a1d27] border border-[#6c8aff]/40 rounded-lg shadow-xl p-3">
+      <div className="flex items-start gap-2">
+        <span className="text-[#6c8aff] text-sm">🔎</span>
+        <div className="flex-1">
+          <div className="text-xs font-semibold text-[#e1e4ed] mb-1">Coherence Check</div>
+          <div className="text-xs text-[#c8ccd8] leading-relaxed whitespace-pre-wrap">{message}</div>
+        </div>
+        <button onClick={onClose} className="text-[#8b90a0] hover:text-[#e1e4ed] text-xs">✕</button>
+      </div>
+    </div>
+  );
+}
+
+interface PastePopupProps {
+  detected: { type: 'doi' | 'url' | 'citation'; value: string };
+  onLookup: () => void;
+  onDismiss: () => void;
+}
+
+function PastePopup({ detected, onLookup, onDismiss }: PastePopupProps) {
+  const labels: Record<string, string> = {
+    doi: 'DOI detected',
+    url: 'URL detected',
+    citation: 'Citation string detected',
+  };
+  const actions: Record<string, string> = {
+    doi: 'Search Zotero',
+    url: 'Search Zotero',
+    citation: 'Search Zotero',
+  };
+  return (
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-[#1a1d27] border border-[#6c8aff]/40 rounded-lg shadow-xl px-4 py-2 flex items-center gap-3">
+      <span className="text-xs text-[#8b90a0]">{labels[detected.type]}: <span className="text-[#e1e4ed] font-mono">{detected.value.substring(0, 40)}</span></span>
+      <button onClick={onLookup} className="px-2 py-1 bg-[#6c8aff] hover:bg-[#5a78f0] text-white text-xs rounded transition-colors">
+        {actions[detected.type]}
+      </button>
+      <button onClick={onDismiss} className="text-[#8b90a0] hover:text-[#e1e4ed] text-xs">✕</button>
+    </div>
+  );
+}
+
 interface BlockItemProps {
   block: Block;
   isFirst: boolean;
   onFocus: (id: string) => void;
   onBlur: (id: string, html: string) => void;
   onKeyDown: (e: React.KeyboardEvent, id: string, html: string) => void;
+  onPaste: (e: React.ClipboardEvent, id: string) => void;
   onDragStart: (e: React.DragEvent, id: string) => void;
   onDragOver: (e: React.DragEvent, id: string) => void;
   onDrop: (e: React.DragEvent, id: string) => void;
@@ -166,6 +236,7 @@ function BlockItem({
   onFocus,
   onBlur,
   onKeyDown,
+  onPaste,
   onDragStart,
   onDragOver,
   onDrop,
@@ -187,6 +258,7 @@ function BlockItem({
   const activeHtml = block.versions[block.activeVersion]?.html || '';
   const prevActiveVersion = useRef(block.activeVersion);
   const prevBlockId = useRef(block.id);
+  const [hovered, setHovered] = useState(false);
 
   // Set innerHTML on mount or when version/block changes
   useEffect(() => {
@@ -210,7 +282,6 @@ function BlockItem({
   const isDropBefore = dropTargetId === block.id && dropPosition === 'before';
   const isDropAfter = dropTargetId === block.id && dropPosition === 'after';
   const isFocused = focusedId === block.id;
-  // Highlight drop target when cmd-dragging (merge mode)
   const isCmdDropTarget = draggedId !== null && cmdMode && dropTargetId === block.id && draggedId !== block.id;
 
   const handleHandleClick = (e: React.MouseEvent) => {
@@ -226,8 +297,10 @@ function BlockItem({
     .map(cid => ({ num: citationMap.get(cid), citation: projectCitations.find(c => c.id === cid) }))
     .filter((x): x is { num: number; citation: Citation } => x.num !== undefined && x.citation !== undefined);
 
+  const wc = wordCount(activeHtml);
+
   return (
-    <div className="group relative">
+    <div className="group relative" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       {/* Drop indicator before */}
       <div className={`drop-indicator ${isDropBefore && !cmdMode ? 'active' : ''}`} />
       <div
@@ -286,6 +359,7 @@ function BlockItem({
             onFocus={() => onFocus(block.id)}
             onBlur={() => onBlur(block.id, contentRef.current?.innerHTML || '')}
             onKeyDown={e => onKeyDown(e, block.id, contentRef.current?.innerHTML || '')}
+            onPaste={e => onPaste(e, block.id)}
           />
           {/* Citation badges */}
           {blockCitations.length > 0 && (
@@ -311,6 +385,12 @@ function BlockItem({
             </div>
           )}
         </div>
+        {/* Word count badge (hover) */}
+        {hovered && wc > 0 && (
+          <div className="flex-shrink-0 mt-1 text-[10px] text-[#8b90a0]/60 select-none whitespace-nowrap">
+            {wc}w
+          </div>
+        )}
       </div>
       {/* Drop indicator after */}
       <div className={`drop-indicator ${isDropAfter && !cmdMode ? 'active' : ''}`} />
@@ -340,6 +420,9 @@ export default function BlockEditor() {
   const [contextMenu, setContextMenu] = useState<{ blockId: string; pos: { top: number; left: number } } | null>(null);
   const [cmdMode, setCmdMode] = useState(false);
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(new Set());
+  const [coherenceToast, setCoherenceToast] = useState<string | null>(null);
+  const [pastePopup, setPastePopup] = useState<{ type: 'doi' | 'url' | 'citation'; value: string } | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pendingFocusId = useRef<string | null>(null);
 
@@ -347,10 +430,15 @@ export default function BlockEditor() {
   const projectCitations = currentProject?.citations || [];
   const citationMap = getOrderedCitationMap(blocks, projectCitations);
 
+  // Total word count
+  const totalWords = blocks.reduce((sum, b) => sum + wordCount(b.versions[b.activeVersion]?.html || ''), 0);
+  const readingMins = Math.ceil(totalWords / 200);
+
   // Track Cmd key for merge mode
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Meta') setCmdMode(true);
+      // Cmd+K handled in MainApp
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'Meta') setCmdMode(false);
@@ -404,6 +492,34 @@ export default function BlockEditor() {
     }
   };
 
+  // #18 — Paste-and-Parse Smart Detection
+  const handlePaste = useCallback((_e: React.ClipboardEvent, _blockId: string) => {
+    const text = _e.clipboardData.getData('text/plain').trim();
+    // DOI pattern
+    const doiMatch = text.match(/\b(10\.\d{4,}\/\S+)/);
+    // URL pattern
+    const urlMatch = text.match(/^https?:\/\/\S+$/);
+    // Citation string: "Author et al., YYYY"
+    const citMatch = text.match(/[A-Z][a-z]+.{1,50}\d{4}/);
+
+    if (doiMatch) {
+      setPastePopup({ type: 'doi', value: doiMatch[1] });
+    } else if (urlMatch && !doiMatch) {
+      setPastePopup({ type: 'url', value: text });
+    } else if (citMatch && text.length < 200) {
+      setPastePopup({ type: 'citation', value: text });
+    }
+    // Always allow normal paste to proceed
+  }, []);
+
+  const handlePasteSearch = () => {
+    if (!pastePopup) return;
+    // Open Zotero tab and populate search with the detected value
+    const event = new CustomEvent('zotero-search', { detail: { query: pastePopup.value } });
+    window.dispatchEvent(event);
+    setPastePopup(null);
+  };
+
   // Focus pending block after render
   useEffect(() => {
     if (pendingFocusId.current) {
@@ -444,7 +560,6 @@ export default function BlockEditor() {
     e.preventDefault();
     if (draggedId && targetId !== draggedId) {
       if (e.metaKey) {
-        // Cmd+drop = merge dragged block into target
         mergeBlocks([draggedId, targetId]);
       } else if (dropPosition) {
         moveBlock(draggedId, targetId, dropPosition);
@@ -458,6 +573,39 @@ export default function BlockEditor() {
   const handleDragLeave = (e: React.DragEvent) => {
     setDropTargetId(null);
     setDropPosition(null);
+  };
+
+  // #16 — PDF Drop-to-Extract
+  const handleEditorDragOver = (e: React.DragEvent) => {
+    const files = Array.from(e.dataTransfer.items || []);
+    const hasPdf = files.some(f => f.type === 'application/pdf' || (f.kind === 'file' && f.getAsFile()?.name?.endsWith('.pdf')));
+    if (hasPdf) {
+      e.preventDefault();
+      setIsDragOver(true);
+    }
+  };
+
+  const handleEditorDrop = async (e: React.DragEvent) => {
+    setIsDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    const pdf = files.find(f => f.type === 'application/pdf' || f.name.endsWith('.pdf'));
+    if (!pdf) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Show loading block
+    const loadingBlock = addBlock(`<p><em>Extracting PDF: ${pdf.name}...</em></p>`);
+    const formData = new FormData();
+    formData.append('file', pdf);
+    try {
+      const res = await fetch('/api/pdf/extract', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.text) {
+        addBlockVersion(loadingBlock.id, `<p>${data.text}</p>`, `PDF: ${pdf.name}`);
+      }
+    } catch (err) {
+      addBlockVersion(loadingBlock.id, `<p>Failed to extract PDF: ${pdf.name}</p>`, 'Error');
+    }
   };
 
   const handleShowContextMenu = (blockId: string, pos: { top: number; left: number }) => {
@@ -475,7 +623,6 @@ export default function BlockEditor() {
   };
 
   const handleMergeSelected = () => {
-    // Pass IDs; store will sort them by document order
     mergeBlocks(Array.from(selectedBlockIds));
     setSelectedBlockIds(new Set());
     setCmdMode(false);
@@ -512,6 +659,46 @@ export default function BlockEditor() {
     setContextMenu(null);
   };
 
+  // #2 — Paragraph-Level Coherence Check
+  const handleContextCheckCoherence = async () => {
+    if (!contextMenu) return;
+    const { blockId } = contextMenu;
+    setContextMenu(null);
+
+    const blockIdx = blocks.findIndex(b => b.id === blockId);
+    if (blockIdx === -1) return;
+
+    const getHtml = (b: Block) => {
+      const liveEl = document.querySelector(`[data-block-id="${b.id}"] .block-content`) as HTMLElement | null;
+      return liveEl?.innerHTML || b.versions[b.activeVersion]?.html || '';
+    };
+    const stripHtmlLocal = (h: string) => { const d = document.createElement('div'); d.innerHTML = h; return d.textContent || ''; };
+
+    const before = blocks.slice(Math.max(0, blockIdx - 2), blockIdx).map(getHtml).map(stripHtmlLocal);
+    const current = stripHtmlLocal(getHtml(blocks[blockIdx]));
+    const after = blocks.slice(blockIdx + 1, blockIdx + 3).map(getHtml).map(stripHtmlLocal);
+
+    const contextParts: string[] = [];
+    if (before.length) contextParts.push('Previous paragraphs:\n' + before.join('\n\n'));
+    contextParts.push('Current paragraph:\n' + current);
+    if (after.length) contextParts.push('Following paragraphs:\n' + after.join('\n\n'));
+
+    try {
+      const res = await fetch('/api/ai/general', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Does this paragraph flow logically from the surrounding paragraphs? Flag any logical gaps, abrupt transitions, or coherence issues. Be concise.\n\n${contextParts.join('\n\n---\n\n')}`,
+          model: 'anthropic/claude-sonnet-4-20250514',
+        }),
+      });
+      const data = await res.json();
+      setCoherenceToast(data.text || 'No response');
+    } catch {
+      setCoherenceToast('Failed to check coherence.');
+    }
+  };
+
   const handleAIApply = (newHtml: string, instruction: string) => {
     if (aiPopup) {
       addBlockVersion(aiPopup.blockId, newHtml, instruction);
@@ -533,6 +720,11 @@ export default function BlockEditor() {
     return () => { delete (window as any).__insertToEditor; };
   }, [handleInsertFromChat]);
 
+  // Expose focusedId for CommandPalette / other components
+  useEffect(() => {
+    (window as any).__editorFocusedBlockId = focusedId;
+  }, [focusedId]);
+
   if (!currentProject) {
     return (
       <div className="flex items-center justify-center h-full text-[#8b90a0] text-sm">
@@ -553,8 +745,29 @@ export default function BlockEditor() {
     : '';
   const canDisassemble = /<br\s*\/?>\s*<br\s*\/?>/i.test(contextMenuHtml);
 
+  // Context blocks for AI popup (#4)
+  const getAiPopupContext = () => {
+    if (!aiPopup) return { contextBefore: [], contextAfter: [] };
+    const idx = blocks.findIndex(b => b.id === aiPopup.blockId);
+    const getHtml = (b: Block) => b.versions[b.activeVersion]?.html || '';
+    const contextBefore = blocks.slice(Math.max(0, idx - 2), idx).map(getHtml);
+    const contextAfter = blocks.slice(idx + 1, idx + 3).map(getHtml);
+    return { contextBefore, contextAfter };
+  };
+  const { contextBefore, contextAfter } = getAiPopupContext();
+
+  const selectedBlocksHtmlArr = Array.from(selectedBlockIds)
+    .map(id => blocks.find(b => b.id === id))
+    .filter(Boolean)
+    .map(b => b!.versions[b!.activeVersion]?.html || '');
+
   return (
-    <div className="h-full overflow-y-auto bg-[#0f1117]">
+    <div
+      className={`h-full overflow-y-auto bg-[#0f1117] relative ${isDragOver ? 'ring-2 ring-[#6c8aff] ring-inset' : ''}`}
+      onDragOver={handleEditorDragOver}
+      onDragLeave={() => setIsDragOver(false)}
+      onDrop={handleEditorDrop}
+    >
       {/* Cmd-mode hint bar */}
       {cmdMode && (
         <div className="sticky top-0 z-10 bg-[#6c8aff]/10 border-b border-[#6c8aff]/30 px-4 py-1.5 flex items-center gap-3 text-xs text-[#6c8aff]">
@@ -569,6 +782,18 @@ export default function BlockEditor() {
           )}
         </div>
       )}
+      {/* PDF drop overlay */}
+      {isDragOver && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#6c8aff]/10 pointer-events-none">
+          <div className="text-[#6c8aff] text-lg font-semibold">Drop PDF to extract</div>
+        </div>
+      )}
+      {/* Word count bar */}
+      {totalWords > 0 && (
+        <div className="sticky top-0 z-[5] flex justify-end px-4 py-0.5 bg-[#0f1117]/80 backdrop-blur-sm">
+          <span className="text-[10px] text-[#8b90a0]/60">{totalWords} words · ~{readingMins} min read</span>
+        </div>
+      )}
       <div className="max-w-3xl mx-auto py-6">
         {blocks.map((block, idx) => (
           <div key={block.id} data-block-id={block.id}>
@@ -578,6 +803,7 @@ export default function BlockEditor() {
               onFocus={handleFocus}
               onBlur={handleBlur}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               onDragStart={handleDragStart}
               onDragOver={handleDragOver}
               onDrop={handleDrop}
@@ -620,6 +846,7 @@ export default function BlockEditor() {
           onSaveVersion={handleContextSaveVersion}
           onDisassemble={handleContextDisassemble}
           onDeleteBlock={handleContextDeleteBlock}
+          onCheckCoherence={handleContextCheckCoherence}
           canDisassemble={canDisassemble}
         />
       )}
@@ -628,9 +855,25 @@ export default function BlockEditor() {
         <BlockAIPopup
           blockId={aiPopup.blockId}
           blockHtml={blocks.find(b => b.id === aiPopup.blockId)?.versions[blocks.find(b => b.id === aiPopup.blockId)?.activeVersion || 0]?.html || ''}
+          contextBefore={contextBefore}
+          contextAfter={contextAfter}
+          selectedBlocksHtml={selectedBlocksHtmlArr}
+          projectTitle={currentProject?.name}
           onApply={handleAIApply}
           onClose={() => setAiPopup(null)}
           position={aiPopup.pos}
+        />
+      )}
+      {/* Coherence toast (#2) */}
+      {coherenceToast && (
+        <CoherenceToast message={coherenceToast} onClose={() => setCoherenceToast(null)} />
+      )}
+      {/* Paste popup (#18) */}
+      {pastePopup && (
+        <PastePopup
+          detected={pastePopup}
+          onLookup={handlePasteSearch}
+          onDismiss={() => setPastePopup(null)}
         />
       )}
     </div>

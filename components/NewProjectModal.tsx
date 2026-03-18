@@ -17,6 +17,7 @@ export default function NewProjectModal({ onClose }: Props) {
   const [name, setName] = useState('');
   const [notebookId, setNotebookId] = useState('');
   const [notebookName, setNotebookName] = useState('');
+  const [zoteroCollection, setZoteroCollection] = useState('');
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
 
   useEffect(() => {
@@ -36,6 +37,7 @@ export default function NewProjectModal({ onClose }: Props) {
       name: name.trim(),
       notebookId: notebookId || null,
       notebookName: notebookName || notebookId || '',
+      zoteroCollection: zoteroCollection.trim(),
     });
     onClose();
   };
@@ -84,6 +86,17 @@ export default function NewProjectModal({ onClose }: Props) {
                 className="w-full bg-[#232733] border border-[#2d3140] rounded px-3 py-2 text-sm focus:outline-none focus:border-[#6c8aff]"
               />
             )}
+          </div>
+          <div>
+            <label className="block text-sm text-[#8b90a0] mb-1">Zotero Collection Key <span className="text-[#8b90a0]/60">(optional)</span></label>
+            <input
+              type="text"
+              value={zoteroCollection}
+              onChange={e => setZoteroCollection(e.target.value)}
+              placeholder="e.g. ABC12345 (from Zotero collection URL)"
+              className="w-full bg-[#232733] border border-[#2d3140] rounded px-3 py-2 text-sm focus:outline-none focus:border-[#6c8aff]"
+            />
+            <div className="text-xs text-[#8b90a0]/60 mt-1">Scopes Zotero searches to this collection. Find key in Zotero → right-click collection → Copy Collection Key.</div>
           </div>
           <div className="flex gap-2 justify-end pt-2">
             {canClose && (

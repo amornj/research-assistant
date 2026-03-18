@@ -53,8 +53,9 @@ interface Store {
   mergeBlocks: (blockIds: string[]) => void;
   splitBlock: (blockId: string, liveHtml?: string) => void;
   // Citation actions
-  addCitationToBlock: (blockId: string, zoteroKey: string, data: CitationData) => void;
+  addCitationToBlock: (blockId: string, zoteroKey: string, data: CitationData) => { duplicate: boolean; citationId: string };
   removeCitationFromBlock: (blockId: string, citationId: string) => void;
+  updateCitation: (citationId: string, updates: Partial<import('@/types').Citation>) => void;
   // Chat
   setChatHistory: (history: ChatMessage[]) => void;
   addChatMessage: (msg: ChatMessage) => void;
@@ -366,15 +367,22 @@ export const useStore = create<Store>((set, get) => ({
 
   addCitationToBlock: (blockId, zoteroKey, data) => {
     const { projects, currentProjectId } = get();
-    if (!currentProjectId) return;
+    if (!currentProjectId) return { duplicate: false, citationId: '' };
     const project = projects.find(p => p.id === currentProjectId);
-    if (!project) return;
+    if (!project) return { duplicate: false, citationId: '' };
 
-    // Find or create citation in project.citations
-    let citation = project.citations.find(c => c.zoteroKey === zoteroKey);
+    // Duplicate detection: check by zoteroKey OR DOI
+    const existingByKey = project.citations.find(c => c.zoteroKey === zoteroKey);
+    const existingByDoi = data.DOI
+      ? project.citations.find(c => c.data.DOI && c.data.DOI === data.DOI && c.zoteroKey !== zoteroKey)
+      : null;
+
+    let citation = existingByKey || existingByDoi || null;
     let citations = project.citations;
+    const isDuplicate = !!(existingByKey || existingByDoi);
+
     if (!citation) {
-      citation = { id: generateId(), zoteroKey, data };
+      citation = { id: generateId(), zoteroKey, data, doiVerified: null };
       citations = [...citations, citation];
     }
 
@@ -388,6 +396,22 @@ export const useStore = create<Store>((set, get) => ({
     const updated = projects.map(p =>
       p.id === currentProjectId ? { ...p, citations, blocks } : p
     );
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+    return { duplicate: isDuplicate, citationId: citId };
+  },
+
+  updateCitation: (citationId, updates) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const citations = p.citations.map(c =>
+        c.id === citationId ? { ...c, ...updates } : c
+      );
+      return { ...p, citations };
+    });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
     saveToStorage(updated);
     set({ projects: updated, currentProject });

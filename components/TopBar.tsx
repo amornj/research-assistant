@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useStore, getOrderedCitationMap } from '@/store/useStore';
 import { Citation } from '@/types';
+import { formatCitationEntry, CitationStyle } from '@/lib/citationFormatter';
 
 interface TopBarProps {
   onNewProject: () => void;
@@ -27,56 +28,31 @@ function htmlToText(html: string): string {
     .replace(/&quot;/g, '"');
 }
 
-function formatCitationEntry(citation: Citation): string {
-  const { data } = citation;
-  const authors = (data.creators || [])
-    .map(c => c.lastName || c.name || c.firstName || '')
-    .filter(Boolean)
-    .join(', ');
-  const year = data.date ? data.date.substring(0, 4) : '';
-  const title = data.title || 'Untitled';
-  const journal = data.publicationTitle || '';
-  const vol = data.volume ? `${data.volume}` : '';
-  const pages = data.pages ? `${data.pages}` : '';
-  const doi = data.DOI ? `DOI: ${data.DOI}` : '';
-
-  let entry = `${authors}${year ? ` (${year})` : ''}. ${title}.`;
-  if (journal) entry += ` ${journal}`;
-  if (vol) entry += `, ${vol}`;
-  if (pages) entry += `, ${pages}`;
-  entry += '.';
-  if (doi) entry += ` ${doi}`;
-  return entry;
-}
-
-function formatCitationEntryHTML(citation: Citation): string {
-  const { data } = citation;
-  const authors = (data.creators || [])
-    .map(c => c.lastName || c.name || c.firstName || '')
-    .filter(Boolean)
-    .join(', ');
-  const year = data.date ? data.date.substring(0, 4) : '';
-  const title = data.title || 'Untitled';
-  const journal = data.publicationTitle || '';
-  const vol = data.volume ? `${data.volume}` : '';
-  const pages = data.pages ? `${data.pages}` : '';
-  const doi = data.DOI
-    ? `<a href="https://doi.org/${data.DOI}" style="color:#6c8aff">DOI: ${data.DOI}</a>`
-    : '';
-
-  let entry = `<li>${authors}${year ? ` (${year})` : ''}. <em>${title}</em>.`;
-  if (journal) entry += ` ${journal}`;
-  if (vol) entry += `, ${vol}`;
-  if (pages) entry += `, ${pages}`;
-  entry += '.';
-  if (doi) entry += ` ${doi}`;
-  entry += '</li>';
-  return entry;
+function formatCitationEntryHTML(citation: Citation, num: number, style: CitationStyle): string {
+  const text = formatCitationEntry(citation, num, style);
+  const doiUrl = citation.data.DOI ? `https://doi.org/${citation.data.DOI}` : citation.data.url || '';
+  // For HTML export, linkify DOI if present
+  if (doiUrl && citation.data.DOI) {
+    return `<li>${text.replace(doiUrl, `<a href="${doiUrl}" style="color:#6c8aff">${doiUrl}</a>`)}</li>`;
+  }
+  return `<li>${text}</li>`;
 }
 
 export default function TopBar({ onNewProject }: TopBarProps) {
   const { projects, currentProjectId, selectProject } = useStore();
   const [showExport, setShowExport] = useState(false);
+  const [citationStyle, setCitationStyle] = useState<CitationStyle>('vancouver');
+
+  // Listen for command palette export events (#13)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.type === 'markdown') handleExportMarkdown();
+      else if (detail?.type === 'html') handleExportHTML();
+    };
+    window.addEventListener('command-export', handler);
+    return () => window.removeEventListener('command-export', handler);
+  }, [citationStyle]);
 
   const handleExportMarkdown = () => {
     const { currentProject } = useStore.getState();
@@ -107,7 +83,7 @@ export default function TopBar({ onNewProject }: TopBarProps) {
       for (const [citId, num] of allCited) {
         const citation = currentProject.citations.find(c => c.id === citId);
         if (citation) {
-          md += `${num}. ${formatCitationEntry(citation)}\n\n`;
+          md += `${formatCitationEntry(citation, num, citationStyle)}\n\n`;
         }
       }
     }
@@ -151,7 +127,7 @@ export default function TopBar({ onNewProject }: TopBarProps) {
       for (const [citId, num] of allCited) {
         const citation = currentProject.citations.find(c => c.id === citId);
         if (citation) {
-          body += formatCitationEntryHTML(citation);
+          body += formatCitationEntryHTML(citation, num, citationStyle);
         }
       }
       body += '</ol>';
@@ -166,6 +142,76 @@ export default function TopBar({ onNewProject }: TopBarProps) {
     a.click();
     URL.revokeObjectURL(url);
     setShowExport(false);
+  };
+
+  // #20 — Export to Roam
+  const handleExportRoam = async () => {
+    const { currentProject } = useStore.getState();
+    if (!currentProject) return;
+    setShowExport(false);
+    const citationMap = getOrderedCitationMap(currentProject.blocks, currentProject.citations);
+
+    // Build Roam-compatible markdown
+    let md = `# ${currentProject.name}\n\n`;
+    for (const block of currentProject.blocks) {
+      const html = block.versions[block.activeVersion]?.html || '';
+      const text = htmlToText(html).trim();
+      if (!text) continue;
+      const cids = block.citationIds || [];
+      const nums = cids.map(id => citationMap.get(id)).filter((n): n is number => n !== undefined);
+      const citStr = nums.length > 0 ? ` [${nums.join(',')}]` : '';
+      md += `- ${text}${citStr}\n`;
+    }
+
+    // References
+    const allCited = [...citationMap.entries()].sort((a, b) => a[1] - b[1]);
+    if (allCited.length > 0) {
+      md += '\n- ## References\n';
+      for (const [citId, num] of allCited) {
+        const citation = currentProject.citations.find(c => c.id === citId);
+        if (citation) {
+          md += `    - ${formatCitationEntry(citation, num, citationStyle)}\n`;
+        }
+      }
+    }
+
+    // Use Roam MCP via custom event (picked up by MainApp)
+    const event = new CustomEvent('export-to-roam', { detail: { title: currentProject.name, content: md } });
+    window.dispatchEvent(event);
+  };
+
+  // #20 — Export to Notion
+  const handleExportNotion = () => {
+    const { currentProject } = useStore.getState();
+    if (!currentProject) return;
+    setShowExport(false);
+    const citationMap = getOrderedCitationMap(currentProject.blocks, currentProject.citations);
+
+    // Build Notion-compatible markdown
+    let md = `# ${currentProject.name}\n\n`;
+    for (const block of currentProject.blocks) {
+      const html = block.versions[block.activeVersion]?.html || '';
+      const text = htmlToText(html).trim();
+      if (!text) continue;
+      const cids = block.citationIds || [];
+      const nums = cids.map(id => citationMap.get(id)).filter((n): n is number => n !== undefined);
+      const citStr = nums.length > 0 ? ` [${nums.join(',')}]` : '';
+      md += `${text}${citStr}\n\n`;
+    }
+
+    const allCited = [...citationMap.entries()].sort((a, b) => a[1] - b[1]);
+    if (allCited.length > 0) {
+      md += '## References\n\n';
+      for (const [citId, num] of allCited) {
+        const citation = currentProject.citations.find(c => c.id === citId);
+        if (citation) {
+          md += `${formatCitationEntry(citation, num, citationStyle)}\n\n`;
+        }
+      }
+    }
+
+    const event = new CustomEvent('export-to-notion', { detail: { title: currentProject.name, content: md } });
+    window.dispatchEvent(event);
   };
 
   return (
@@ -187,7 +233,19 @@ export default function TopBar({ onNewProject }: TopBarProps) {
       >
         + New
       </button>
-      <div className="relative ml-auto">
+      <div className="relative ml-auto flex items-center gap-2">
+        {/* #1 — Citation style selector */}
+        <select
+          value={citationStyle}
+          onChange={e => setCitationStyle(e.target.value as CitationStyle)}
+          className="px-1.5 py-1 text-xs bg-[#232733] border border-[#2d3140] rounded text-[#8b90a0] focus:outline-none focus:border-[#6c8aff] cursor-pointer"
+          title="Citation style for exports"
+        >
+          <option value="vancouver">Vancouver</option>
+          <option value="apa">APA</option>
+          <option value="mla">MLA</option>
+          <option value="chicago">Chicago</option>
+        </select>
         <button
           onClick={() => setShowExport(!showExport)}
           className="px-3 py-1 bg-[#232733] hover:bg-[#2d3140] text-[#e1e4ed] text-sm rounded border border-[#2d3140] transition-colors"
@@ -195,18 +253,31 @@ export default function TopBar({ onNewProject }: TopBarProps) {
           Export ▾
         </button>
         {showExport && (
-          <div className="absolute right-0 top-full mt-1 bg-[#1a1d27] border border-[#2d3140] rounded shadow-lg z-50 min-w-[140px]">
+          <div className="absolute right-0 top-full mt-1 bg-[#1a1d27] border border-[#2d3140] rounded shadow-lg z-50 min-w-[160px]">
             <button
               onClick={handleExportMarkdown}
               className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733] transition-colors"
             >
-              Export as Markdown
+              ⬇ Markdown
             </button>
             <button
               onClick={handleExportHTML}
               className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733] transition-colors"
             >
-              Export as HTML
+              ⬇ HTML
+            </button>
+            <div className="border-t border-[#2d3140]" />
+            <button
+              onClick={handleExportRoam}
+              className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733] transition-colors"
+            >
+              📋 Export to Roam
+            </button>
+            <button
+              onClick={handleExportNotion}
+              className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733] transition-colors"
+            >
+              📋 Export to Notion
             </button>
           </div>
         )}

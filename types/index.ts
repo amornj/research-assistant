@@ -21,6 +21,10 @@ export interface Citation {
   id: string;
   zoteroKey: string;
   data: CitationData;
+  /** null = not yet verified, true = resolves, false = dead link */
+  doiVerified?: boolean | null;
+  /** AI-generated annotation explaining how this source supports the claim */
+  annotationNote?: string;
 }
 
 export interface Block {
@@ -37,6 +41,8 @@ export interface ChatMessage {
   role: string;
   content: string;
   showInsert?: boolean;
+  /** Follow-up question suggestions (for NotebookLM responses) */
+  suggestions?: string[];
 }
 
 export interface Project {
