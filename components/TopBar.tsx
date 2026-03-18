@@ -24,8 +24,12 @@ function htmlToText(html: string): string {
     .replace(/<em[^>]*>(.*?)<\/em>/gi, '*$1*')
     .replace(/<i[^>]*>(.*?)<\/i>/gi, '*$1*')
     .replace(/<li[^>]*>(.*?)<\/li>/gi, '- $1\n')
+    .replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, (match, src) => {
+      return `IMG_TAG_START${src}IMG_TAG_END`;
+    })
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
+    .replace(/IMG_TAG_START(.*?)IMG_TAG_END/g, '<img src="$1" style="width: 100%; height: auto;" />')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
@@ -138,7 +142,7 @@ export default function TopBar({ onNewProject, theme, onThemeChange }: TopBarPro
       body += '</ol>';
     }
 
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${currentProject.name}</title><style>body{font-family:Georgia,serif;max-width:800px;margin:2em auto;padding:0 1em;color:#1a1a1a;line-height:1.6}h1,h2,h3{margin-top:1.5em}</style></head><body><h1>${currentProject.name}</h1>${body}</body></html>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${currentProject.name}</title><style>body{font-family:Georgia,serif;max-width:800px;margin:2em auto;padding:0 1em;color:#1a1a1a;line-height:1.6}h1,h2,h3{margin-top:1.5em}img{width:100%;height:auto;display:block;margin:1em 0;border-radius:4px}</style></head><body><h1>${currentProject.name}</h1>${body}</body></html>`;
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -190,6 +194,7 @@ h1.doc-title { font-size: 20pt; font-weight: 700; text-align: center; margin-bot
 .block ul, .block ol { padding-left: 1.4em; margin: 0 0 7pt; }
 .block li { margin-bottom: 2pt; }
 .block blockquote { border-left: 2.5pt solid #555; padding-left: 10pt; margin: 8pt 0; color: #333; font-style: italic; }
+img { width: 100%; height: auto; display: block; margin: 12pt 0; border-radius: 4pt; }
 strong, b { font-weight: 700; }
 em, i { font-style: italic; }
 sup { font-size: 7.5pt; vertical-align: super; color: #333; }

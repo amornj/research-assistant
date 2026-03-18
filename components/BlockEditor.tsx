@@ -159,6 +159,7 @@ interface BlockContextMenuProps {
   onClose: () => void;
   onOpenAI: () => void;
   onSaveVersion: () => void;
+  onReadAloud: () => void;
   onDisassemble: () => void;
   onDeleteBlock: () => void;
   onCheckCoherence: () => void;
@@ -170,7 +171,7 @@ interface BlockContextMenuProps {
 }
 
 function BlockContextMenu({
-  position, onClose, onOpenAI, onSaveVersion, onDisassemble, onDeleteBlock, onCheckCoherence, onClean, onInsertBelow, canDisassemble, blockHasCitations, onFindReferences,
+  position, onClose, onOpenAI, onSaveVersion, onReadAloud, onDisassemble, onDeleteBlock, onCheckCoherence, onClean, onInsertBelow, canDisassemble, blockHasCitations, onFindReferences,
 }: BlockContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -208,6 +209,9 @@ function BlockContextMenu({
       )}
       <button className={btnClass} onClick={onSaveVersion}>
         💾 Save as New Version
+      </button>
+      <button className={btnClass} onClick={onReadAloud}>
+        🔊 Read Aloud
       </button>
       {canDisassemble && (
         <button className={btnClass} onClick={onDisassemble}>
@@ -707,6 +711,38 @@ export default function BlockEditor() {
 
   const handleDrop = (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
+    
+    // Check for files (images)
+    const files = Array.from(e.dataTransfer.files);
+    const imageFiles = files.filter(f => f.type.startsWith('image/') && /\.(png|jpg|jpeg|gif)$/i.test(f.name));
+    
+    if (imageFiles.length > 0) {
+      // Check if the target block is empty
+      const targetBlock = blocks.find(b => b.id === targetId);
+      const liveEl = document.querySelector(`[data-block-id="${targetId}"] .block-content`) as HTMLElement;
+      const content = liveEl?.textContent?.trim() || '';
+      const hasHtml = liveEl?.innerHTML?.replace(/<br\s*\/?>/gi, '').trim() !== '';
+
+      if (!content && !hasHtml) {
+        // Handle images
+        imageFiles.forEach(file => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const dataUrl = event.target?.result as string;
+            const imgHtml = `<img src="${dataUrl}" alt="${file.name}" style="max-width: 100%; height: auto; border-radius: 4px; margin: 8px 0;" />`;
+            updateBlock(targetId, imgHtml);
+            // After updateBlock, we might need to manually set innerHTML if it doesn't auto-update
+            if (liveEl) liveEl.innerHTML = imgHtml;
+          };
+          reader.readAsDataURL(file);
+        });
+        setDraggedId(null);
+        setDropTargetId(null);
+        setDropPosition(null);
+        return;
+      }
+    }
+
     if (draggedId && targetId !== draggedId) {
       if (e.metaKey) {
         mergeBlocks([draggedId, targetId]);
@@ -724,13 +760,16 @@ export default function BlockEditor() {
     setDropPosition(null);
   };
 
-  // #16 — PDF Drop-to-Extract
+  // #16 — PDF Drop-to-Extract & Image drops
   const handleEditorDragOver = (e: React.DragEvent) => {
-    const files = Array.from(e.dataTransfer.items || []);
-    const hasPdf = files.some(f => f.type === 'application/pdf' || (f.kind === 'file' && f.getAsFile()?.name?.endsWith('.pdf')));
-    if (hasPdf) {
+    const items = Array.from(e.dataTransfer.items || []);
+    const hasPdf = items.some(f => f.type === 'application/pdf' || (f.kind === 'file' && f.getAsFile()?.name?.endsWith('.pdf')));
+    const hasImage = items.some(f => f.type.startsWith('image/'));
+    
+    if (hasPdf || hasImage) {
       e.preventDefault();
-      setIsDragOver(true);
+      // Only show "Drop PDF" overlay for PDFs, not for images being dropped into blocks
+      if (hasPdf && !hasImage) setIsDragOver(true);
     }
   };
 
@@ -827,6 +866,22 @@ export default function BlockEditor() {
     const liveEl = document.querySelector(`[data-block-id="${blockId}"] .block-content`) as HTMLElement;
     const liveHtml = liveEl?.innerHTML || '';
     addBlockVersion(blockId, liveHtml, 'Manual edit');
+    setContextMenu(null);
+  };
+
+  const handleContextReadAloud = () => {
+    if (!contextMenu) return;
+    const { blockId } = contextMenu;
+    const liveEl = document.querySelector(`[data-block-id="${blockId}"] .block-content`) as HTMLElement;
+    let text = liveEl?.textContent || '';
+    // Strip citation artifacts [1], [1, 2] etc
+    text = text.replace(/\[\d+(?:[,\s\u2013\u2014\-]*\d+)*\]/g, '');
+    
+    if (text.trim()) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      window.speechSynthesis.speak(utterance);
+    }
     setContextMenu(null);
   };
 
@@ -1208,6 +1263,7 @@ export default function BlockEditor() {
           onClose={() => setContextMenu(null)}
           onOpenAI={handleContextOpenAI}
           onSaveVersion={handleContextSaveVersion}
+          onReadAloud={handleContextReadAloud}
           onDisassemble={handleContextDisassemble}
           onDeleteBlock={handleContextDeleteBlock}
           onCheckCoherence={handleContextCheckCoherence}
