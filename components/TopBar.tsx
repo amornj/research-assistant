@@ -144,6 +144,68 @@ export default function TopBar({ onNewProject }: TopBarProps) {
     setShowExport(false);
   };
 
+  const handleExportPDF = () => {
+    const { currentProject } = useStore.getState();
+    if (!currentProject) return;
+    setShowExport(false);
+    const citationMap = getOrderedCitationMap(currentProject.blocks, currentProject.citations);
+
+    let body = '';
+    for (const block of currentProject.blocks) {
+      const blockHtml = block.versions[block.activeVersion]?.html || '';
+      if (!blockHtml.trim()) continue;
+      const cids = block.citationIds || [];
+      const nums = cids.map(id => citationMap.get(id)).filter((n): n is number => n !== undefined);
+      const badges = nums.length > 0 ? nums.map(n => `<sup>[${n}]</sup>`).join('') : '';
+      body += `<div class="block">${blockHtml}${badges}</div>\n`;
+    }
+
+    const allCited = [...citationMap.entries()].sort((a, b) => a[1] - b[1]);
+    if (allCited.length > 0) {
+      body += '<div class="references"><h2>References</h2><ol>';
+      for (const [citId, num] of allCited) {
+        const citation = currentProject.citations.find(c => c.id === citId);
+        if (citation) body += `<li>${formatCitationEntry(citation, num, citationStyle)}</li>`;
+      }
+      body += '</ol></div>';
+    }
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${currentProject.name}</title>
+<style>
+@page { size: A4; margin: 25mm 20mm 25mm 20mm; }
+*  { box-sizing: border-box; }
+body { font-family: Georgia, 'Times New Roman', serif; font-size: 11pt; line-height: 1.7; color: #000; background: #fff; margin: 0; }
+h1.doc-title { font-size: 20pt; font-weight: 700; text-align: center; margin-bottom: 28pt; }
+.block { margin-bottom: 9pt; }
+.block h1 { font-size: 16pt; font-weight: 700; margin: 18pt 0 6pt; }
+.block h2 { font-size: 13pt; font-weight: 700; margin: 14pt 0 5pt; }
+.block h3 { font-size: 11pt; font-weight: 700; margin: 11pt 0 4pt; }
+.block p  { margin: 0 0 7pt; }
+.block ul, .block ol { padding-left: 1.4em; margin: 0 0 7pt; }
+.block li { margin-bottom: 2pt; }
+.block blockquote { border-left: 2.5pt solid #555; padding-left: 10pt; margin: 8pt 0; color: #333; font-style: italic; }
+strong, b { font-weight: 700; }
+em, i { font-style: italic; }
+sup { font-size: 7.5pt; vertical-align: super; color: #333; }
+.references { margin-top: 28pt; padding-top: 10pt; border-top: 0.75pt solid #999; }
+.references h2 { font-size: 13pt; font-weight: 700; margin-bottom: 10pt; }
+.references ol { padding-left: 1.4em; }
+.references li { font-size: 9.5pt; line-height: 1.45; margin-bottom: 5pt; }
+a { color: #000; text-decoration: none; }
+@media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+<h1 class="doc-title">${currentProject.name}</h1>
+${body}
+<script>window.onload=function(){setTimeout(function(){window.print();},250);};</script>
+</body></html>`;
+
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); }
+  };
+
   // #20 — Export to Roam
   const handleExportRoam = async () => {
     const { currentProject } = useStore.getState();
@@ -265,6 +327,12 @@ export default function TopBar({ onNewProject }: TopBarProps) {
               className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733] transition-colors"
             >
               ⬇ HTML
+            </button>
+            <button
+              onClick={handleExportPDF}
+              className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733] transition-colors"
+            >
+              ⬇ PDF (A4)
             </button>
             <div className="border-t border-[#2d3140]" />
             <button
