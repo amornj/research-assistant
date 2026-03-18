@@ -34,9 +34,9 @@ function htmlToText(html: string): string {
 }
 
 function formatCitationEntryHTML(citation: Citation, num: number, style: CitationStyle): string {
-  const text = formatCitationEntry(citation, num, style);
+  // Strip leading "N. " that Vancouver adds — <ol> already provides numbering
+  const text = formatCitationEntry(citation, num, style).replace(/^\d+\.\s*/, '');
   const doiUrl = citation.data.DOI ? `https://doi.org/${citation.data.DOI}` : citation.data.url || '';
-  // For HTML export, linkify DOI if present
   if (doiUrl && citation.data.DOI) {
     return `<li>${text.replace(doiUrl, `<a href="${doiUrl}" style="color:#6c8aff">${doiUrl}</a>`)}</li>`;
   }
@@ -170,7 +170,7 @@ export default function TopBar({ onNewProject, theme, onThemeChange }: TopBarPro
       body += '<div class="references"><h2>References</h2><ol>';
       for (const [citId, num] of allCited) {
         const citation = currentProject.citations.find(c => c.id === citId);
-        if (citation) body += `<li>${formatCitationEntry(citation, num, citationStyle)}</li>`;
+        if (citation) body += `<li>${formatCitationEntry(citation, num, citationStyle).replace(/^\d+\.\s*/, '')}</li>`;
       }
       body += '</ol></div>';
     }

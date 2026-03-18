@@ -1006,12 +1006,36 @@ export default function BlockEditor() {
   // ── Compare mode: side-by-side view ─────────────────────────────────────
   if (compareMode) {
     const cmpBlock = blocks.find(b => b.id === compareMode.blockId);
-    const cmpLabel = cmpBlock?.versions[compareMode.versionIndex]?.instruction
-      || `Version ${compareMode.versionIndex + 1}`;
+    const refVersionIdx = cmpBlock?.activeVersion ?? 0;
+    const refLabel = cmpBlock?.versions[refVersionIdx]?.instruction || `v${refVersionIdx + 1}`;
+    const cmpLabel = cmpBlock?.versions[compareMode.versionIndex]?.instruction || `v${compareMode.versionIndex + 1}`;
+
+    const renderReadOnlyBlock = (block: Block, html: string) => {
+      const isTarget = block.id === compareMode.blockId;
+      const bCitations = (block.citationIds || [])
+        .map(cid => ({ num: citationMap.get(cid) }))
+        .filter((x): x is { num: number } => x.num !== undefined);
+      return (
+        <div
+          key={block.id}
+          className={`px-4 py-0.5 rounded mb-0.5 ${isTarget ? 'ring-1 ring-[#6c8aff]/40 bg-[#6c8aff]/5' : ''}`}
+        >
+          <div className="block-content" dangerouslySetInnerHTML={{ __html: html }} />
+          {bCitations.length > 0 && (
+            <div className="flex gap-0.5 mt-0.5 flex-wrap">
+              {bCitations.map(({ num }) => (
+                <sup key={num} className="text-[10px] bg-[#6c8aff]/20 text-[#6c8aff] px-1 py-0.5 rounded select-none">[{num}]</sup>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    };
+
     return (
       <div className="h-full flex bg-[#0f1117]">
-        {/* Left panel — read-only, old version */}
-        <div className="flex-1 min-w-0 overflow-y-auto border-r border-[#2d3140] flex flex-col">
+        {/* Left panel — reference: the currently active version */}
+        <div className="flex-1 min-w-0 flex flex-col border-r border-[#2d3140]">
           <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-[#2d3140] px-4 py-2 flex items-center gap-3 flex-shrink-0">
             <button
               onClick={() => setCompareMode(null)}
@@ -1019,145 +1043,37 @@ export default function BlockEditor() {
             >
               ✕ Close
             </button>
+            <span className="text-[10px] text-[#8b90a0] uppercase tracking-wide">Reference</span>
+            <span className="text-xs text-[#8b90a0] truncate">v{refVersionIdx + 1} · {refLabel}</span>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            <div className="max-w-2xl mx-auto py-6 px-2">
+              {blocks.map(block => {
+                const html = block.id === compareMode.blockId
+                  ? block.versions[refVersionIdx]?.html || ''
+                  : block.versions[block.activeVersion]?.html || '';
+                return renderReadOnlyBlock(block, html);
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Right panel — the Cmd+clicked version */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-[#2d3140] px-4 py-2 flex items-center gap-3 flex-shrink-0">
             <span className="text-[10px] text-[#8b90a0] uppercase tracking-wide">Comparing</span>
             <span className="text-xs text-[#6c8aff] truncate">v{compareMode.versionIndex + 1} · {cmpLabel}</span>
           </div>
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-2xl mx-auto py-6 px-2">
               {blocks.map(block => {
-                const isTarget = block.id === compareMode.blockId;
-                const html = isTarget
+                const html = block.id === compareMode.blockId
                   ? block.versions[compareMode.versionIndex]?.html || ''
                   : block.versions[block.activeVersion]?.html || '';
-                const bCitations = (block.citationIds || [])
-                  .map(cid => ({ num: citationMap.get(cid) }))
-                  .filter((x): x is { num: number } => x.num !== undefined);
-                return (
-                  <div
-                    key={block.id}
-                    className={`px-4 py-0.5 rounded mb-0.5 ${isTarget ? 'bg-[#6c8aff]/8 ring-1 ring-[#6c8aff]/30' : ''}`}
-                  >
-                    <div
-                      className="text-sm text-[#c8ccd8] leading-relaxed [&_h1]:text-2xl [&_h1]:font-bold [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:text-lg [&_h3]:font-semibold [&_strong]:font-semibold [&_em]:italic"
-                      dangerouslySetInnerHTML={{ __html: html }}
-                    />
-                    {bCitations.length > 0 && (
-                      <div className="flex gap-0.5 mt-0.5 flex-wrap">
-                        {bCitations.map(({ num }) => (
-                          <sup key={num} className="text-[10px] bg-[#6c8aff]/20 text-[#6c8aff] px-1 py-0.5 rounded select-none">[{num}]</sup>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
+                return renderReadOnlyBlock(block, html);
               })}
             </div>
           </div>
-        </div>
-
-        {/* Right panel — current, fully editable */}
-        <div
-          className="flex-1 min-w-0 overflow-y-auto relative"
-          onDragOver={handleEditorDragOver}
-          onDragLeave={() => setIsDragOver(false)}
-          onDrop={handleEditorDrop}
-        >
-          {isDragOver && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#6c8aff]/10 pointer-events-none">
-              <div className="text-[#6c8aff] text-lg font-semibold">Drop PDF to extract</div>
-            </div>
-          )}
-          <div className="sticky top-0 z-10 bg-[#1a1d27] border-b border-[#2d3140] px-4 py-2 flex items-center justify-between flex-shrink-0">
-            <span className="text-[10px] text-[#8b90a0] uppercase tracking-wide">Current (editable)</span>
-            {totalWords > 0 && (
-              <span className="text-[10px] text-[#8b90a0]/60">{totalWords} words · ~{readingMins} min read</span>
-            )}
-          </div>
-          {cmdMode && (
-            <div className="sticky top-9 z-10 bg-[#6c8aff]/10 border-b border-[#6c8aff]/30 px-4 py-1.5 flex items-center gap-3 text-xs text-[#6c8aff]">
-              <span>⌘ Merge mode</span>
-              {selectedBlockIds.size >= 2 && (
-                <button onClick={handleMergeSelected} className="ml-auto px-3 py-1 bg-[#6c8aff] text-white rounded font-medium hover:bg-[#5a78f0] transition-colors">
-                  Merge {selectedBlockIds.size} blocks
-                </button>
-              )}
-            </div>
-          )}
-          <div className="max-w-2xl mx-auto py-6">
-            {blocks.map((block, idx) => (
-              <div key={block.id} data-block-id={block.id}>
-                <BlockItem
-                  block={block}
-                  blockIndex={idx}
-                  isAnimated={animatedBlockId === block.id}
-                  isFirst={idx === 0}
-                  onFocus={handleFocus}
-                  onBlur={handleBlur}
-                  onKeyDown={handleKeyDown}
-                  onPaste={handlePaste}
-                  onDragStart={handleDragStart}
-                  onDragOver={handleDragOver}
-                  onDrop={handleDrop}
-                  onDragLeave={handleDragLeave}
-                  dropTargetId={dropTargetId}
-                  dropPosition={dropPosition}
-                  onShowContextMenu={handleShowContextMenu}
-                  onSwitchVersion={switchBlockVersion}
-                  onDeleteVersion={deleteBlockVersion}
-                  onCompare={handleCompare}
-                  focusedId={focusedId}
-                  citationMap={citationMap}
-                  projectCitations={projectCitations}
-                  cmdMode={cmdMode}
-                  isSelected={selectedBlockIds.has(block.id)}
-                  onToggleSelect={handleToggleSelect}
-                  draggedId={draggedId}
-                  onRemoveCitation={removeCitationFromBlock}
-                />
-              </div>
-            ))}
-            <div className="h-16 cursor-text" onClick={() => {
-              const lastBlock = blocks[blocks.length - 1];
-              if (lastBlock) {
-                const el = document.querySelector(`[data-block-id="${lastBlock.id}"] .block-content`) as HTMLElement;
-                if (el) el.focus();
-              }
-            }} />
-          </div>
-          {/* Context menu */}
-          {contextMenu && (
-            <BlockContextMenu
-              blockId={contextMenu.blockId}
-              blockHtml={contextMenuHtml}
-              position={contextMenu.pos}
-              onClose={() => setContextMenu(null)}
-              onOpenAI={handleContextOpenAI}
-              onSaveVersion={handleContextSaveVersion}
-              onDisassemble={handleContextDisassemble}
-              onDeleteBlock={handleContextDeleteBlock}
-              onCheckCoherence={handleContextCheckCoherence}
-              onClean={handleContextClean}
-              onInsertBelow={handleContextInsertBelow}
-              canDisassemble={canDisassemble}
-              blockHasCitations={contextMenuBlockHasCitations}
-              onFindReferences={handleContextFindReferences}
-            />
-          )}
-          {aiPopup && (
-            <BlockAIPopup
-              blockId={aiPopup.blockId}
-              blockHtml={blocks.find(b => b.id === aiPopup.blockId)?.versions[blocks.find(b => b.id === aiPopup.blockId)?.activeVersion || 0]?.html || ''}
-              contextBefore={contextBefore}
-              contextAfter={contextAfter}
-              selectedBlocksHtml={selectedBlocksHtmlArr}
-              projectTitle={currentProject?.name}
-              onApply={handleAIApply}
-              onClose={() => setAiPopup(null)}
-              position={aiPopup.pos}
-            />
-          )}
-          {coherenceToast && <CoherenceToast message={coherenceToast} onClose={() => setCoherenceToast(null)} />}
-          {pastePopup && <PastePopup detected={pastePopup} onLookup={handlePasteSearch} onDismiss={() => setPastePopup(null)} />}
         </div>
       </div>
     );
