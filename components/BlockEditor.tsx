@@ -163,13 +163,14 @@ interface BlockContextMenuProps {
   onDeleteBlock: () => void;
   onCheckCoherence: () => void;
   onClean: () => void;
+  onInsertBelow: () => void;
   canDisassemble: boolean;
   blockHasCitations: boolean;
   onFindReferences: () => void;
 }
 
 function BlockContextMenu({
-  position, onClose, onOpenAI, onSaveVersion, onDisassemble, onDeleteBlock, onCheckCoherence, onClean, canDisassemble, blockHasCitations, onFindReferences,
+  position, onClose, onOpenAI, onSaveVersion, onDisassemble, onDeleteBlock, onCheckCoherence, onClean, onInsertBelow, canDisassemble, blockHasCitations, onFindReferences,
 }: BlockContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -214,6 +215,9 @@ function BlockContextMenu({
         </button>
       )}
       <div className="border-t border-[#2d3140] my-0.5" />
+      <button className={btnClass} onClick={onInsertBelow}>
+        ➕ Insert Block Below
+      </button>
       <button className={`${btnClass} text-red-400 hover:text-red-300 hover:bg-red-500/10`} onClick={onDeleteBlock}>
         🗑️ Delete Block
       </button>
@@ -841,6 +845,13 @@ export default function BlockEditor() {
     setContextMenu(null);
   };
 
+  const handleContextInsertBelow = () => {
+    if (!contextMenu) return;
+    const newBlock = addBlock('', contextMenu.blockId);
+    pendingFocusId.current = newBlock.id;
+    setContextMenu(null);
+  };
+
   const handleContextClean = () => {
     if (!contextMenu) return;
     const { blockId } = contextMenu;
@@ -1126,6 +1137,7 @@ export default function BlockEditor() {
               onDeleteBlock={handleContextDeleteBlock}
               onCheckCoherence={handleContextCheckCoherence}
               onClean={handleContextClean}
+              onInsertBelow={handleContextInsertBelow}
               canDisassemble={canDisassemble}
               blockHasCitations={contextMenuBlockHasCitations}
               onFindReferences={handleContextFindReferences}
@@ -1284,6 +1296,7 @@ export default function BlockEditor() {
           onDeleteBlock={handleContextDeleteBlock}
           onCheckCoherence={handleContextCheckCoherence}
           onClean={handleContextClean}
+          onInsertBelow={handleContextInsertBelow}
           canDisassemble={canDisassemble}
           blockHasCitations={contextMenuBlockHasCitations}
           onFindReferences={handleContextFindReferences}

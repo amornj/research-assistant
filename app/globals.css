@@ -63,7 +63,9 @@ html, body {
 .block-content h2 { font-size: 1.5rem; font-weight: 600; margin: 0.5em 0 0.25em; }
 .block-content h3 { font-size: 1.25rem; font-weight: 600; margin: 0.5em 0 0.25em; }
 .block-content ul, .block-content ol { padding-left: 1.5em; margin: 0.25em 0; }
-.block-content li { margin: 0.1em 0; }
+.block-content ul { list-style-type: disc; }
+.block-content ol { list-style-type: decimal; }
+.block-content li { margin: 0.1em 0; display: list-item; }
 .block-content blockquote {
   border-left: 3px solid var(--accent);
   padding-left: 1em;
