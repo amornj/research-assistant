@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
+import { playCompletionSound } from '@/lib/sounds';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -70,6 +71,7 @@ export default function NotebookPane() {
       }
 
       addChatMessage({ role: 'assistant', content: answer, showInsert: true, suggestions });
+      playCompletionSound();
     } catch (e) {
       addChatMessage({ role: 'assistant', content: 'Error connecting to NotebookLM.' });
     } finally {

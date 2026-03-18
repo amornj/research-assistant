@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
+import { playCompletionSound } from '@/lib/sounds';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -61,6 +62,7 @@ export default function AIWritingTab() {
       const data = await res.json();
       const reply = data.text || data.response || data.answer || 'No response';
       setMessages(prev => [...prev, { role: 'assistant', content: reply, showInsert: true }]);
+      playCompletionSound();
     } catch (e) {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Error connecting to AI.' }]);
     } finally {

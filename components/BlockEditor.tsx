@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useStore, getOrderedCitationMap } from '@/store/useStore';
 import { Block, Citation } from '@/types';
 import BlockAIPopup from './BlockAIPopup';
+import { playCompletionSound } from '@/lib/sounds';
 
 function formatAuthors(creators?: { firstName?: string; lastName?: string; name?: string }[]): string {
   if (!creators || creators.length === 0) return '';
@@ -269,6 +270,7 @@ function PastePopup({ detected, onLookup, onDismiss }: PastePopupProps) {
 interface BlockItemProps {
   block: Block;
   blockIndex: number;
+  isAnimated?: boolean;
   onCompare: (blockId: string, versionIndex: number) => void;
   isFirst: boolean;
   onFocus: (id: string) => void;
@@ -297,6 +299,7 @@ interface BlockItemProps {
 function BlockItem({
   block,
   blockIndex,
+  isAnimated,
   onCompare,
   isFirst,
   onFocus,
@@ -368,7 +371,7 @@ function BlockItem({
   const wc = wordCount(activeHtml);
 
   return (
-    <div className="group relative" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+    <div className={`group relative${isAnimated ? ' block-glow' : ''}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       {/* Block number — shown on hover, floats left of the block rectangle */}
       <div
         className={`absolute -left-7 top-1/2 -translate-y-1/2 text-[11px] font-mono text-[#8b90a0]/40 select-none transition-opacity pointer-events-none ${hovered ? 'opacity-100' : 'opacity-0'}`}
@@ -530,6 +533,7 @@ export default function BlockEditor() {
   const [pastePopup, setPastePopup] = useState<{ type: 'doi' | 'url' | 'citation'; value: string } | null>(null);
   const [compareMode, setCompareMode] = useState<{ blockId: string; versionIndex: number } | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [animatedBlockId, setAnimatedBlockId] = useState<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pendingFocusId = useRef<string | null>(null);
 
@@ -782,6 +786,7 @@ export default function BlockEditor() {
     const cleaned = cleanMarkdown(rawHtml);
     if (cleaned !== rawHtml) {
       addBlockVersion(blockId, cleaned, 'Cleaned markdown');
+      triggerComplete(blockId);
     }
     setContextMenu(null);
   };
@@ -827,9 +832,16 @@ export default function BlockEditor() {
       });
       const data = await res.json();
       setCoherenceToast(data.text || 'No response');
+      triggerComplete(blockId);
     } catch {
       setCoherenceToast('Failed to check coherence.');
     }
+  };
+
+  const triggerComplete = (blockId: string) => {
+    playCompletionSound();
+    setAnimatedBlockId(blockId);
+    setTimeout(() => setAnimatedBlockId(null), 1100);
   };
 
   const handleCompare = (blockId: string, versionIndex: number) => {
@@ -839,6 +851,7 @@ export default function BlockEditor() {
   const handleAIApply = (newHtml: string, instruction: string) => {
     if (aiPopup) {
       addBlockVersion(aiPopup.blockId, newHtml, instruction);
+      triggerComplete(aiPopup.blockId);
     }
     setAiPopup(null);
   };
@@ -984,6 +997,7 @@ export default function BlockEditor() {
                 <BlockItem
                   block={block}
                   blockIndex={idx}
+                  isAnimated={animatedBlockId === block.id}
                   isFirst={idx === 0}
                   onFocus={handleFocus}
                   onBlur={handleBlur}

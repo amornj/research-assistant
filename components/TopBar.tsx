@@ -7,7 +7,12 @@ import { formatCitationEntry, CitationStyle } from '@/lib/citationFormatter';
 
 interface TopBarProps {
   onNewProject: () => void;
+  theme: 'dark' | 'light' | 'system';
+  onThemeChange: (t: 'dark' | 'light' | 'system') => void;
 }
+
+const THEME_ICONS: Record<string, string> = { dark: '🌙', light: '☀️', system: '💻' };
+const NEXT_THEME: Record<string, 'dark' | 'light' | 'system'> = { dark: 'light', light: 'system', system: 'dark' };
 
 function htmlToText(html: string): string {
   return html
@@ -38,7 +43,7 @@ function formatCitationEntryHTML(citation: Citation, num: number, style: Citatio
   return `<li>${text}</li>`;
 }
 
-export default function TopBar({ onNewProject }: TopBarProps) {
+export default function TopBar({ onNewProject, theme, onThemeChange }: TopBarProps) {
   const { projects, currentProjectId, selectProject } = useStore();
   const [showExport, setShowExport] = useState(false);
   const [citationStyle, setCitationStyle] = useState<CitationStyle>('vancouver');
@@ -296,6 +301,14 @@ ${body}
         + New
       </button>
       <div className="relative ml-auto flex items-center gap-2">
+        {/* Theme toggle */}
+        <button
+          onClick={() => onThemeChange(NEXT_THEME[theme])}
+          className="px-2 py-1 text-sm bg-[#232733] hover:bg-[#2d3140] border border-[#2d3140] rounded transition-colors"
+          title={`Theme: ${theme} — click to cycle`}
+        >
+          {THEME_ICONS[theme]}
+        </button>
         {/* #1 — Citation style selector */}
         <select
           value={citationStyle}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
+import { playCompletionSound } from '@/lib/sounds';
 
 interface ZoteroItem {
   key: string;
@@ -97,6 +98,7 @@ export default function ZoteroTab() {
       const data = await res.json();
       if (Array.isArray(data)) {
         setResults(data);
+        playCompletionSound();
         // Verify DOIs in background
         verifyDois(data);
       } else if (data.error) {

@@ -20,6 +20,10 @@ export default function MainApp() {
   const [leftTab, setLeftTab] = useState<'nlm' | 'outline'>('nlm');
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [bottomCollapsed, setBottomCollapsed] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light' | 'system'>(() => {
+    if (typeof window === 'undefined') return 'dark';
+    return (localStorage.getItem('ra-theme') as 'dark' | 'light' | 'system') || 'dark';
+  });
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingH = useRef(false);
   const isDraggingV = useRef(false);
@@ -27,6 +31,26 @@ export default function MainApp() {
   useEffect(() => {
     loadProjects();
   }, []);
+
+  // Theme management
+  useEffect(() => {
+    const applyTheme = (t: 'dark' | 'light' | 'system') => {
+      if (t === 'system') {
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+      } else {
+        document.documentElement.setAttribute('data-theme', t);
+      }
+    };
+    applyTheme(theme);
+    localStorage.setItem('ra-theme', theme);
+    if (theme === 'system') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      const handler = () => applyTheme('system');
+      mq.addEventListener('change', handler);
+      return () => mq.removeEventListener('change', handler);
+    }
+  }, [theme]);
 
   useEffect(() => {
     const store = useStore.getState();
@@ -152,7 +176,7 @@ export default function MainApp() {
 
   return (
     <div className="flex flex-col h-screen">
-      <TopBar onNewProject={() => setShowNewProject(true)} />
+      <TopBar onNewProject={() => setShowNewProject(true)} theme={theme} onThemeChange={setTheme} />
       <div ref={containerRef} className="flex flex-1 overflow-hidden">
         {/* Left pane: NLM / Outline toggle */}
         <div
