@@ -196,6 +196,11 @@ interface BlockContextMenuProps {
   onToggleFrozen: () => void;
   // Feature #19
   onViewTimeline: () => void;
+  // Collapse/Expand
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  onCollapseAll: () => void;
+  onExpandAll: () => void;
 }
 
 function BlockContextMenu({
@@ -203,6 +208,7 @@ function BlockContextMenu({
   onCheckCoherence, onClean, onInsertBelow, canDisassemble, blockHasCitations, onFindReferences,
   wordCount, currentBlockType, onSetBlockType, onAddComment, onFindRelated,
   frozen, onToggleFrozen, onViewTimeline,
+  collapsed, onToggleCollapse, onCollapseAll, onExpandAll,
 }: BlockContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [showTypeMenu, setShowTypeMenu] = useState(false);
@@ -281,6 +287,12 @@ function BlockContextMenu({
       {/* Feature #9: Add Comment */}
       <button className={btnClass} onClick={onAddComment}>💬 Add Comment</button>
 
+      <div className="border-t border-[#2d3140] my-0.5" />
+      <button className={btnClass} onClick={() => { onToggleCollapse(); onClose(); }}>
+        {collapsed ? '▶ Expand Block' : '▼ Collapse Block'}
+      </button>
+      <button className={btnClass} onClick={() => { onCollapseAll(); onClose(); }}>📦 Collapse All</button>
+      <button className={btnClass} onClick={() => { onExpandAll(); onClose(); }}>📂 Expand All</button>
       <div className="border-t border-[#2d3140] my-0.5" />
       <button className={btnClass} onClick={onInsertBelow}>➕ Insert Block Below</button>
       <button className={btnClass} onClick={onToggleFrozen}>
@@ -1803,6 +1815,10 @@ export default function BlockEditor() {
           frozen={contextMenuBlock?.frozen ?? false}
           onToggleFrozen={() => { if (contextMenu) { toggleBlockFrozen(contextMenu.blockId); setContextMenu(null); } }}
           onViewTimeline={() => { if (contextMenu) { setTimelineBlockId(contextMenu.blockId); setContextMenu(null); } }}
+          collapsed={contextMenu ? collapsedBlockIds.has(contextMenu.blockId) : false}
+          onToggleCollapse={() => { if (contextMenu) handleToggleCollapse(contextMenu.blockId, false); }}
+          onCollapseAll={() => { setCollapsedBlockIds(new Set(blocks.map(b => b.id))); }}
+          onExpandAll={() => { setCollapsedBlockIds(new Set()); }}
         />
       )}
 

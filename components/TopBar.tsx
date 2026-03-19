@@ -71,6 +71,7 @@ export default function TopBar({ onNewProject, theme, onThemeChange }: TopBarPro
   const [showGoalInput, setShowGoalInput] = useState(false);
   const [goalInputVal, setGoalInputVal] = useState('');
   const [showWritingLog, setShowWritingLog] = useState(false);
+  const [showHamburger, setShowHamburger] = useState(false);
 
   // Compute total words from current project blocks
   const totalWords = (() => {
@@ -375,94 +376,116 @@ ${body}
           + New
         </button>
 
-        <div className="relative ml-auto flex items-center gap-2">
-          {/* Theme toggle */}
-          <button onClick={() => onThemeChange(NEXT_THEME[theme])}
-            className="px-2 py-1 text-sm bg-[#232733] hover:bg-[#2d3140] border border-[#2d3140] rounded transition-colors"
-            title={`Theme: ${theme}`}>{THEME_ICONS[theme]}</button>
-
-          {/* Citation style */}
-          <select value={citationStyle} onChange={e => setCitationStyle(e.target.value as CitationStyle)}
-            className="px-1.5 py-1 text-xs bg-[#232733] border border-[#2d3140] rounded text-[#8b90a0] focus:outline-none focus:border-[#6c8aff] cursor-pointer">
-            <option value="vancouver">Vancouver</option>
-            <option value="apa">APA</option>
-            <option value="mla">MLA</option>
-            <option value="chicago">Chicago</option>
-          </select>
-
-          {/* Feature #14: Writing log button */}
-          <div className="relative">
-            <button onClick={() => setShowWritingLog(v => !v)}
-              className="px-2 py-1 text-xs bg-[#232733] hover:bg-[#2d3140] border border-[#2d3140] rounded text-[#8b90a0] hover:text-[#e1e4ed] transition-colors"
-              title="Writing log">
-              📊
-            </button>
-            {showWritingLog && (
-              <div className="absolute right-0 top-full mt-1 bg-[#1a1d27] border border-[#2d3140] rounded shadow-xl z-50 p-3 min-w-[200px]"
-                onMouseLeave={() => setShowWritingLog(false)}>
-                <div className="text-[10px] text-[#8b90a0] mb-2 font-semibold uppercase tracking-wide">Writing Log</div>
-                {currentProject?.writingLog && currentProject.writingLog.length > 0 ? (
-                  <>
-                    <WritingSparkline log={currentProject.writingLog} />
-                    <div className="mt-2 text-[10px] text-[#8b90a0]">
-                      {currentProject.writingLog.slice(-3).reverse().map(e => (
-                        <div key={e.date}>{e.date}: +{e.words} words</div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <div className="text-[10px] text-[#8b90a0]">No writing data yet</div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Feature #5: Word count goal */}
-          <div className="relative flex items-center gap-1">
-            <button
-              onClick={() => setShowGoalInput(v => !v)}
-              className="text-[10px] text-[#8b90a0]/50 hover:text-[#6c8aff] transition-colors"
-              title="Set word count goal"
-            >
-              🎯
-            </button>
-            {showGoalInput && (
-              <div className="absolute right-0 top-full mt-1 bg-[#1a1d27] border border-[#2d3140] rounded shadow-xl z-50 p-2 flex gap-1 items-center">
-                <input
-                  type="number"
-                  value={goalInputVal}
-                  onChange={e => setGoalInputVal(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleGoalSubmit(); if (e.key === 'Escape') setShowGoalInput(false); }}
-                  placeholder={wordCountGoal?.toString() || 'Word goal'}
-                  className="w-24 bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] focus:outline-none focus:border-[#6c8aff]"
-                  autoFocus
-                />
-                <button onClick={handleGoalSubmit} className="px-2 py-1 text-xs bg-[#6c8aff] hover:bg-[#5a78f0] text-white rounded">Set</button>
-                {wordCountGoal && (
-                  <button onClick={() => { setWordCountGoal(undefined); setShowGoalInput(false); }} className="px-2 py-1 text-xs bg-[#232733] text-[#8b90a0] rounded">Clear</button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Export menu */}
-          <button onClick={() => setShowExport(!showExport)}
-            className="px-3 py-1 bg-[#232733] hover:bg-[#2d3140] text-[#e1e4ed] text-sm rounded border border-[#2d3140] transition-colors">
-            Export ▾
+        <div className="relative ml-auto">
+          {/* Hamburger menu button */}
+          <button
+            onClick={() => setShowHamburger(v => !v)}
+            className="px-2 py-1 text-lg bg-[#232733] hover:bg-[#2d3140] border border-[#2d3140] rounded transition-colors text-[#e1e4ed]"
+            title="Menu"
+          >
+            ☰
           </button>
-          {showExport && (
-            <div className="absolute right-0 top-full mt-1 bg-[#1a1d27] border border-[#2d3140] rounded shadow-lg z-50 min-w-[180px]">
-              <button onClick={handleExportMarkdown} className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733]">⬇ Markdown</button>
-              <button onClick={handleExportHTML} className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733]">⬇ HTML</button>
-              <button onClick={handleExportPDF} className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733]">⬇ PDF (A4)</button>
-              <button onClick={handleExportDocx} className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733]">⬇ Word (.docx)</button>
-              <button onClick={handleExportObsidian} className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733]">📝 Obsidian (.md)</button>
-              <div className="border-t border-[#2d3140]" />
-              <button onClick={handleGenerateAbstract} className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733]">🧠 Generate Abstract</button>
-              <button onClick={handleShare} className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733]">🔗 Share (read-only link)</button>
-              <div className="border-t border-[#2d3140]" />
-              <button onClick={handleExportRoam} className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733]">📋 Export to Roam</button>
-              <button onClick={handleExportNotion} className="w-full text-left px-4 py-2 text-sm hover:bg-[#232733]">📋 Export to Notion</button>
+
+          {showHamburger && (
+            <div className="absolute right-0 top-full mt-1 bg-[#1a1d27] border border-[#2d3140] rounded shadow-xl z-50 min-w-[220px] py-1"
+              onMouseLeave={() => { setShowHamburger(false); setShowWritingLog(false); setShowGoalInput(false); setShowExport(false); }}>
+
+              {/* Theme */}
+              <div className="px-3 py-1.5 text-[10px] text-[#8b90a0] uppercase tracking-wide font-semibold">Appearance</div>
+              <button
+                onClick={() => onThemeChange(NEXT_THEME[theme])}
+                className="w-full text-left px-4 py-2 text-sm text-[#c8ccd8] hover:bg-[#2d3140] hover:text-[#e1e4ed] transition-colors"
+              >
+                {THEME_ICONS[theme]} Theme: {theme}
+              </button>
+
+              {/* Citation style */}
+              <div className="px-4 py-2 flex items-center gap-2">
+                <span className="text-xs text-[#8b90a0]">Citation:</span>
+                <select value={citationStyle} onChange={e => setCitationStyle(e.target.value as CitationStyle)}
+                  className="flex-1 px-1.5 py-1 text-xs bg-[#232733] border border-[#2d3140] rounded text-[#8b90a0] focus:outline-none focus:border-[#6c8aff] cursor-pointer">
+                  <option value="vancouver">Vancouver</option>
+                  <option value="apa">APA</option>
+                  <option value="mla">MLA</option>
+                  <option value="chicago">Chicago</option>
+                </select>
+              </div>
+
+              <div className="border-t border-[#2d3140] my-1" />
+
+              {/* Writing log */}
+              <div className="px-3 py-1.5 text-[10px] text-[#8b90a0] uppercase tracking-wide font-semibold">Writing</div>
+              <button
+                onClick={() => setShowWritingLog(v => !v)}
+                className="w-full text-left px-4 py-2 text-sm text-[#c8ccd8] hover:bg-[#2d3140] hover:text-[#e1e4ed] transition-colors"
+              >
+                📊 Writing Log
+              </button>
+              {showWritingLog && (
+                <div className="px-4 py-2 bg-[#232733]/50">
+                  {currentProject?.writingLog && currentProject.writingLog.length > 0 ? (
+                    <>
+                      <WritingSparkline log={currentProject.writingLog} />
+                      <div className="mt-2 text-[10px] text-[#8b90a0]">
+                        {currentProject.writingLog.slice(-3).reverse().map(e => (
+                          <div key={e.date}>{e.date}: +{e.words} words</div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-[10px] text-[#8b90a0]">No writing data yet</div>
+                  )}
+                </div>
+              )}
+
+              {/* Word count goal */}
+              <button
+                onClick={() => setShowGoalInput(v => !v)}
+                className="w-full text-left px-4 py-2 text-sm text-[#c8ccd8] hover:bg-[#2d3140] hover:text-[#e1e4ed] transition-colors"
+              >
+                🎯 Word Count Goal{wordCountGoal ? ` (${wordCountGoal})` : ''}
+              </button>
+              {showGoalInput && (
+                <div className="px-4 py-2 flex gap-1 items-center bg-[#232733]/50">
+                  <input
+                    type="number"
+                    value={goalInputVal}
+                    onChange={e => setGoalInputVal(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleGoalSubmit(); if (e.key === 'Escape') setShowGoalInput(false); }}
+                    placeholder={wordCountGoal?.toString() || 'Word goal'}
+                    className="w-24 bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] focus:outline-none focus:border-[#6c8aff]"
+                    autoFocus
+                  />
+                  <button onClick={handleGoalSubmit} className="px-2 py-1 text-xs bg-[#6c8aff] hover:bg-[#5a78f0] text-white rounded">Set</button>
+                  {wordCountGoal && (
+                    <button onClick={() => { setWordCountGoal(undefined); setShowGoalInput(false); }} className="px-2 py-1 text-xs bg-[#232733] text-[#8b90a0] rounded">Clear</button>
+                  )}
+                </div>
+              )}
+
+              <div className="border-t border-[#2d3140] my-1" />
+
+              {/* Export section */}
+              <div className="px-3 py-1.5 text-[10px] text-[#8b90a0] uppercase tracking-wide font-semibold">Export</div>
+              <button onClick={handleExportMarkdown} className="w-full text-left px-4 py-2 text-sm text-[#c8ccd8] hover:bg-[#2d3140]">⬇ Markdown</button>
+              <button onClick={handleExportHTML} className="w-full text-left px-4 py-2 text-sm text-[#c8ccd8] hover:bg-[#2d3140]">⬇ HTML</button>
+              <button onClick={handleExportPDF} className="w-full text-left px-4 py-2 text-sm text-[#c8ccd8] hover:bg-[#2d3140]">⬇ PDF (A4)</button>
+              <button onClick={handleExportDocx} className="w-full text-left px-4 py-2 text-sm text-[#c8ccd8] hover:bg-[#2d3140]">⬇ Word (.docx)</button>
+              <button onClick={handleExportObsidian} className="w-full text-left px-4 py-2 text-sm text-[#c8ccd8] hover:bg-[#2d3140]">📝 Obsidian (.md)</button>
+
+              <div className="border-t border-[#2d3140] my-1" />
+
+              {/* Tools */}
+              <div className="px-3 py-1.5 text-[10px] text-[#8b90a0] uppercase tracking-wide font-semibold">Tools</div>
+              <button onClick={handleGenerateAbstract} className="w-full text-left px-4 py-2 text-sm text-[#c8ccd8] hover:bg-[#2d3140]">🧠 Generate Abstract</button>
+              <button onClick={handleShare} className="w-full text-left px-4 py-2 text-sm text-[#c8ccd8] hover:bg-[#2d3140]">🔗 Share (read-only link)</button>
+
+              <div className="border-t border-[#2d3140] my-1" />
+
+              {/* Integrations */}
+              <div className="px-3 py-1.5 text-[10px] text-[#8b90a0] uppercase tracking-wide font-semibold">Integrations</div>
+              <button onClick={handleExportRoam} className="w-full text-left px-4 py-2 text-sm text-[#c8ccd8] hover:bg-[#2d3140]">📋 Export to Roam</button>
+              <button onClick={handleExportNotion} className="w-full text-left px-4 py-2 text-sm text-[#c8ccd8] hover:bg-[#2d3140]">📋 Export to Notion</button>
             </div>
           )}
         </div>
