@@ -27,6 +27,12 @@ export interface Citation {
   annotationNote?: string;
 }
 
+export interface BlockComment {
+  id: string;
+  text: string;
+  createdAt: number;
+}
+
 export interface Block {
   id: string;
   type: string;
@@ -35,6 +41,12 @@ export interface Block {
   citationIds: string[];
   /** Per-segment citation mapping from merge — used by disassemble to restore citations correctly */
   mergeSegmentCitations?: string[][];
+  /** Feature #7: block type label */
+  blockType?: 'paragraph' | 'hypothesis' | 'background' | 'method' | 'result' | 'discussion' | 'conclusion';
+  /** Feature #9: inline comments */
+  blockComments?: BlockComment[];
+  /** Feature #17: frozen block (read-only) */
+  frozen?: boolean;
 }
 
 export interface ChatMessage {
@@ -56,4 +68,8 @@ export interface Project {
   chatHistory: ChatMessage[];
   conversationId: string | null;
   createdAt: string;
+  /** Feature #5: word count goal */
+  wordCountGoal?: number;
+  /** Feature #14: daily writing log */
+  writingLog?: { date: string; words: number }[];
 }

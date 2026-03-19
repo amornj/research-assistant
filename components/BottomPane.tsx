@@ -4,11 +4,11 @@ import { useState, useEffect } from 'react';
 import AIWritingTab from './AIWritingTab';
 import ZoteroTab from './ZoteroTab';
 import NotebookSwitcher from './NotebookSourcePanel';
+import CitationGraph from './CitationGraph';
 
 export default function BottomPane() {
-  const [activeTab, setActiveTab] = useState<'ai' | 'zotero' | 'sources'>('ai');
+  const [activeTab, setActiveTab] = useState<'ai' | 'zotero' | 'sources' | 'graph'>('ai');
 
-  // Listen for tab-switch events from command palette
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -18,48 +18,26 @@ export default function BottomPane() {
     return () => window.removeEventListener('bottom-tab-change', handler);
   }, []);
 
-  // Focus Zotero search when commanded
   useEffect(() => {
-    const handler = () => {
-      setActiveTab('zotero');
-    };
+    const handler = () => setActiveTab('zotero');
     window.addEventListener('command-focus-zotero', handler);
     return () => window.removeEventListener('command-focus-zotero', handler);
   }, []);
 
+  const tabClass = (tab: typeof activeTab) =>
+    `px-4 py-2 text-xs font-medium transition-colors border-b-2 ${
+      activeTab === tab
+        ? 'border-[#6c8aff] text-[#6c8aff]'
+        : 'border-transparent text-[#8b90a0] hover:text-[#e1e4ed]'
+    }`;
+
   return (
     <div className="flex flex-col h-full bg-[#1a1d27]">
       <div className="flex border-b border-[#2d3140] flex-shrink-0">
-        <button
-          onClick={() => setActiveTab('ai')}
-          className={`px-4 py-2 text-xs font-medium transition-colors border-b-2 ${
-            activeTab === 'ai'
-              ? 'border-[#6c8aff] text-[#6c8aff]'
-              : 'border-transparent text-[#8b90a0] hover:text-[#e1e4ed]'
-          }`}
-        >
-          AI Writing
-        </button>
-        <button
-          onClick={() => setActiveTab('zotero')}
-          className={`px-4 py-2 text-xs font-medium transition-colors border-b-2 ${
-            activeTab === 'zotero'
-              ? 'border-[#6c8aff] text-[#6c8aff]'
-              : 'border-transparent text-[#8b90a0] hover:text-[#e1e4ed]'
-          }`}
-        >
-          Zotero
-        </button>
-        <button
-          onClick={() => setActiveTab('sources')}
-          className={`px-4 py-2 text-xs font-medium transition-colors border-b-2 ${
-            activeTab === 'sources'
-              ? 'border-[#6c8aff] text-[#6c8aff]'
-              : 'border-transparent text-[#8b90a0] hover:text-[#e1e4ed]'
-          }`}
-        >
-          Notebooks
-        </button>
+        <button onClick={() => setActiveTab('ai')} className={tabClass('ai')}>AI Writing</button>
+        <button onClick={() => setActiveTab('zotero')} className={tabClass('zotero')}>Zotero</button>
+        <button onClick={() => setActiveTab('sources')} className={tabClass('sources')}>Notebooks</button>
+        <button onClick={() => setActiveTab('graph')} className={tabClass('graph')}>Graph</button>
       </div>
       <div className="flex-1 overflow-hidden relative">
         <div style={{ display: activeTab === 'ai' ? 'flex' : 'none' }} className="flex-col h-full">
@@ -70,6 +48,9 @@ export default function BottomPane() {
         </div>
         <div style={{ display: activeTab === 'sources' ? 'flex' : 'none' }} className="flex-col h-full">
           <NotebookSwitcher />
+        </div>
+        <div style={{ display: activeTab === 'graph' ? 'flex' : 'none', height: '100%' }}>
+          {activeTab === 'graph' && <CitationGraph />}
         </div>
       </div>
     </div>

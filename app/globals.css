@@ -146,6 +146,17 @@ html, body {
   border-radius: 6px;
 }
 
+/* ── Feature #11: Block link spans ─────────────────────────────────────── */
+.block-link {
+  color: #6c8aff;
+  cursor: pointer;
+  border-bottom: 1px dashed #6c8aff;
+  transition: color 0.15s;
+}
+.block-link:hover {
+  color: #a0b4ff;
+}
+
 /* ── Light theme CSS variables (used by .block-content, .version-pill, etc) */
 [data-theme="light"] {
   --bg: #f4f5f8;

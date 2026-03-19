@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Project, Block, ChatMessage, Citation, CitationData } from '@/types';
+import { Project, Block, ChatMessage, Citation, CitationData, BlockComment } from '@/types';
 
 function generateId(): string {
   return Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
@@ -61,6 +61,17 @@ interface Store {
   setChatHistory: (history: ChatMessage[]) => void;
   addChatMessage: (msg: ChatMessage) => void;
   setConversationId: (id: string | null) => void;
+  // Feature #5
+  setWordCountGoal: (goal: number | undefined) => void;
+  // Feature #7
+  setBlockType: (blockId: string, type: Block['blockType']) => void;
+  // Feature #9
+  addBlockComment: (blockId: string, text: string) => void;
+  deleteBlockComment: (blockId: string, commentId: string) => void;
+  // Feature #14
+  updateWritingLog: (date: string, words: number) => void;
+  // Feature #17
+  toggleBlockFrozen: (blockId: string) => void;
 }
 
 function saveToStorage(projects: Project[]) {
@@ -85,7 +96,14 @@ export const useStore = create<Store>((set, get) => ({
       const migrated = projects.map(p => ({
         ...p,
         citations: p.citations || [],
-        blocks: (p.blocks || []).map(b => ({ ...b, citationIds: b.citationIds || [] })),
+        blocks: (p.blocks || []).map(b => ({
+          ...b,
+          citationIds: b.citationIds || [],
+          blockType: b.blockType || undefined,
+          blockComments: b.blockComments || [],
+          frozen: b.frozen || false,
+        })),
+        writingLog: p.writingLog || [],
       }));
       const currentProjectId = migrated.length > 0 ? migrated[0].id : null;
       set({
@@ -485,6 +503,90 @@ export const useStore = create<Store>((set, get) => ({
     const updated = projects.map(p =>
       p.id === currentProjectId ? { ...p, conversationId: id } : p
     );
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  setWordCountGoal: (goal) => {
+    get().updateProjectField('wordCountGoal', goal);
+  },
+
+  setBlockType: (blockId, type) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.map(b => b.id === blockId ? { ...b, blockType: type } : b);
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  addBlockComment: (blockId, text) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const comment: BlockComment = { id: Math.random().toString(36).substr(2, 9), text, createdAt: Date.now() };
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.map(b => b.id === blockId
+        ? { ...b, blockComments: [...(b.blockComments || []), comment] }
+        : b
+      );
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  deleteBlockComment: (blockId, commentId) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.map(b => b.id === blockId
+        ? { ...b, blockComments: (b.blockComments || []).filter(c => c.id !== commentId) }
+        : b
+      );
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  updateWritingLog: (date, words) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const log = [...(p.writingLog || [])];
+      const existing = log.findIndex(e => e.date === date);
+      if (existing >= 0) {
+        log[existing] = { date, words };
+      } else {
+        log.push({ date, words });
+      }
+      // Keep last 30 days
+      log.sort((a, b) => a.date.localeCompare(b.date));
+      return { ...p, writingLog: log.slice(-30) };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  toggleBlockFrozen: (blockId) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.map(b => b.id === blockId ? { ...b, frozen: !b.frozen } : b);
+      return { ...p, blocks };
+    });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
     saveToStorage(updated);
     set({ projects: updated, currentProject });

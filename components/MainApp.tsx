@@ -98,6 +98,22 @@ export default function MainApp() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Feature #3: Focus mode — collapse panels
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { active } = (e as CustomEvent).detail;
+      if (active) {
+        setLeftCollapsed(true);
+        setBottomCollapsed(true);
+      } else {
+        setLeftCollapsed(false);
+        setBottomCollapsed(false);
+      }
+    };
+    window.addEventListener('focus-mode-change', handler);
+    return () => window.removeEventListener('focus-mode-change', handler);
+  }, []);
+
   // Command palette actions
   useEffect(() => {
     const focusZotero = () => {
