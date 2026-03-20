@@ -59,6 +59,7 @@ export default function ZoteroTab() {
   const [urlInput, setUrlInput] = useState('');
   const [urlLoading, setUrlLoading] = useState(false);
   const [showUrlImport, setShowUrlImport] = useState(false);
+  const [searchAllCollections, setSearchAllCollections] = useState(true);
   const { focusedBlockId, addCitationToBlock, updateCitation, currentProject } = useStore();
 
   // Listen for zotero-search events from BlockEditor paste detection (#18)
@@ -91,7 +92,7 @@ export default function ZoteroTab() {
     setLoading(true);
     setError('');
     try {
-      const collection = currentProject?.zoteroCollection || '';
+      const collection = (!searchAllCollections && currentProject?.zoteroCollection) ? currentProject.zoteroCollection : '';
       const params = new URLSearchParams({ q });
       if (collection) params.set('collection', collection);
       const res = await fetch(`/api/zotero/search?${params}`);
@@ -306,9 +307,20 @@ export default function ZoteroTab() {
             </button>
           </div>
         )}
-        {currentProject?.zoteroCollection && (
-          <div className="text-[10px] text-[#8b90a0] mt-0.5">Scoped to collection: {currentProject.zoteroCollection}</div>
-        )}
+        <div className="flex items-center gap-2 mt-1">
+          <label className="flex items-center gap-1 cursor-pointer text-[10px] text-[#8b90a0] hover:text-[#e1e4ed] select-none">
+            <input
+              type="checkbox"
+              checked={searchAllCollections}
+              onChange={e => setSearchAllCollections(e.target.checked)}
+              className="accent-[#6c8aff] w-3 h-3"
+            />
+            Search all collections
+          </label>
+          {!searchAllCollections && currentProject?.zoteroCollection && (
+            <span className="text-[10px] text-[#6c8aff] truncate">({currentProject.zoteroCollection})</span>
+          )}
+        </div>
         {!focusedBlockId && results.length > 0 && (
           <div className="text-xs text-[#8b90a0] mt-1">Click a block in the editor to focus it, then use 📎 Cite</div>
         )}

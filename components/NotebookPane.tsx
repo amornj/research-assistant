@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
 import { playCompletionSound } from '@/lib/sounds';
 
+interface Notebook { id: string; name: string; }
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
@@ -12,11 +14,24 @@ interface Message {
 }
 
 export default function NotebookPane() {
-  const { currentProject, addChatMessage, setChatHistory, setConversationId, addBlock, addCitationToBlock, focusedBlockId } = useStore();
+  const { currentProject, addChatMessage, setChatHistory, setConversationId, addBlock, addCitationToBlock, focusedBlockId, updateProjectField } = useStore();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [captureLoading, setCaptureLoading] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [notebooks, setNotebooks] = useState<Notebook[]>([]);
+  const [nbLoading, setNbLoading] = useState(false);
+
+  useEffect(() => {
+    setNbLoading(true);
+    fetch('/api/notebooks/list')
+      .then(r => r.json())
+      .then(d => {
+        if (Array.isArray(d)) setNotebooks(d.map((item: any) => ({ id: item.id || item.notebook_id || '', name: item.name || item.title || 'Untitled' })));
+      })
+      .catch(() => {})
+      .finally(() => setNbLoading(false));
+  }, []);
 
   const messages: Message[] = (currentProject?.chatHistory || []) as Message[];
   const notebookId = currentProject?.notebookId;
@@ -137,12 +152,31 @@ export default function NotebookPane() {
 
   return (
     <div className="flex flex-col h-full bg-[#1a1d27]">
-      <div className="px-3 py-2 border-b border-[#2d3140] flex items-center justify-between">
-        <span className="text-xs font-semibold text-[#8b90a0] uppercase tracking-wide">NotebookLM</span>
-        {currentProject?.notebookName && (
-          <span className="text-xs text-[#6c8aff] truncate max-w-[150px]" title={currentProject.notebookName}>
-            {currentProject.notebookName}
-          </span>
+      <div className="px-3 py-2 border-b border-[#2d3140] flex-shrink-0">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-xs font-semibold text-[#8b90a0] uppercase tracking-wide">NotebookLM</span>
+          {nbLoading && <span className="text-[10px] text-[#8b90a0]">Loading...</span>}
+        </div>
+        <select
+          value={currentProject?.notebookId || ''}
+          onChange={e => {
+            const nb = notebooks.find(n => n.id === e.target.value);
+            if (nb) {
+              updateProjectField('notebookId', nb.id);
+              updateProjectField('notebookName', nb.name);
+              updateProjectField('conversationId', null);
+            } else {
+              updateProjectField('notebookId', null);
+              updateProjectField('notebookName', '');
+            }
+          }}
+          className="w-full bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] focus:outline-none focus:border-[#6c8aff]"
+        >
+          <option value="">— Select notebook —</option>
+          {notebooks.map(nb => <option key={nb.id} value={nb.id}>{nb.name}</option>)}
+        </select>
+        {!currentProject?.notebookId && (
+          <div className="text-[10px] text-yellow-400 mt-1">Select a notebook to enable chat</div>
         )}
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2">

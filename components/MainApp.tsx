@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from '@/store/useStore';
 import TopBar from './TopBar';
 import NotebookPane from './NotebookPane';
-import NotebookSourcePanel from './NotebookSourcePanel';
 import AIWritingTab from './AIWritingTab';
+import OutlinePanel from './OutlinePanel';
 import SourcesTab from './SourcesTab';
 import ZoteroTab from './ZoteroTab';
 import BlockEditor from './BlockEditor';
@@ -25,7 +25,7 @@ export default function MainApp() {
   const [showNewProject, setShowNewProject] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [leftWidth, setLeftWidth] = useState(320);
-  const [leftTab, setLeftTab] = useState<'nlm' | 'notebook' | 'ai' | 'sources'>('nlm');
+  const [leftTab, setLeftTab] = useState<'nlm' | 'ai' | 'outline' | 'sources'>('nlm');
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light' | 'system'>('dark');
 
@@ -345,7 +345,7 @@ export default function MainApp() {
     return <BlockEditor />;
   };
 
-  const leftTabClass = (tab: 'nlm' | 'notebook' | 'ai' | 'sources') =>
+  const leftTabClass = (tab: 'nlm' | 'ai' | 'outline' | 'sources') =>
     `flex-1 px-2 py-1.5 text-xs font-medium transition-colors border-b-2 ${
       leftTab === tab
         ? 'border-[#6c8aff] text-[#6c8aff]'
@@ -389,15 +389,15 @@ export default function MainApp() {
         >
           {/* Left pane tab switcher */}
           <div className="flex border-b border-[#2d3140] flex-shrink-0">
-            <button onClick={() => setLeftTab('nlm')} className={leftTabClass('nlm')}>NotebookLM</button>
-            <button onClick={() => setLeftTab('notebook')} className={leftTabClass('notebook')}>Notebook</button>
-            <button onClick={() => setLeftTab('ai')} className={leftTabClass('ai')}>AI Writing</button>
+            <button onClick={() => setLeftTab('nlm')} className={leftTabClass('nlm')}>NLM</button>
+            <button onClick={() => setLeftTab('ai')} className={leftTabClass('ai')}>AI</button>
+            <button onClick={() => setLeftTab('outline')} className={leftTabClass('outline')}>Outline</button>
             <button onClick={() => setLeftTab('sources')} className={leftTabClass('sources')}>Sources</button>
           </div>
           <div className="flex-1 overflow-hidden">
             {leftTab === 'nlm' && <NotebookPane />}
-            {leftTab === 'notebook' && <NotebookSourcePanel />}
             {leftTab === 'ai' && <AIWritingTab />}
+            {leftTab === 'outline' && <OutlinePanel />}
             {leftTab === 'sources' && <SourcesTab />}
           </div>
         </div>

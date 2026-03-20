@@ -57,6 +57,8 @@ export default function SourcesTab() {
   const [selectedCollection, setSelectedCollection] = useState('');
   const [newCollectionName, setNewCollectionName] = useState('');
   const [selectedNotebookId, setSelectedNotebookId] = useState('');
+  const [newNotebookName, setNewNotebookName] = useState('');
+  const [creatingNotebook, setCreatingNotebook] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -93,6 +95,31 @@ export default function SourcesTab() {
       const detail = err instanceof Error ? err.message : String(err);
       setProc(p => p ? { ...p, tasks: { ...p.tasks, [name]: { state: 'error', detail } } } : p);
       return null;
+    }
+  };
+
+  const createAndSelectNotebook = async (): Promise<string> => {
+    const name = newNotebookName.trim();
+    if (!name) throw new Error('No notebook name');
+    setCreatingNotebook(true);
+    try {
+      const res = await fetch('/api/sources/notebooklm/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json() as { ok: boolean; notebookId?: string; error?: string };
+      if (!data.ok || !data.notebookId) throw new Error(data.error || 'Failed to create notebook');
+      // Refresh notebook list
+      fetch('/api/notebooks/list')
+        .then(r => r.json())
+        .then((d: Array<{ id: string; name: string }>) => { if (Array.isArray(d)) setNotebooks(d); })
+        .catch(() => {});
+      setSelectedNotebookId(data.notebookId);
+      setNewNotebookName('');
+      return data.notebookId;
+    } finally {
+      setCreatingNotebook(false);
     }
   };
 
@@ -173,11 +200,15 @@ export default function SourcesTab() {
       ),
 
       (async () => {
-        if (!selectedNotebookId) throw new Error('No notebook selected');
+        let nbId = selectedNotebookId;
+        if (!nbId && newNotebookName.trim()) {
+          nbId = await createAndSelectNotebook();
+        }
+        if (!nbId) throw new Error('No notebook selected');
         setProcessing(p => p ? { ...p, tasks: { ...p.tasks, notebooklm: { state: 'running' } } } : p);
         const form = new FormData();
         form.append('file', file);
-        form.append('notebookId', selectedNotebookId);
+        form.append('notebookId', nbId);
         const res = await fetch('/api/sources/notebooklm', { method: 'POST', body: form });
         const data = await res.json() as { ok: boolean; details?: string; error?: string };
         if (!data.ok) throw new Error(data.error || 'NotebookLM failed');
@@ -205,7 +236,7 @@ export default function SourcesTab() {
       setHistory(h);
       return current;
     });
-  }, [effectiveCollection, selectedNotebookId]);
+  }, [effectiveCollection, selectedNotebookId, newNotebookName]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -293,14 +324,24 @@ export default function SourcesTab() {
         </div>
         <div>
           <label className="text-xs text-[#8b90a0] block mb-1">NotebookLM Notebook</label>
-          <select
-            value={selectedNotebookId}
-            onChange={e => setSelectedNotebookId(e.target.value)}
-            className="w-full bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] focus:outline-none focus:border-[#6c8aff]"
-          >
-            <option value="">— Select notebook —</option>
-            {notebooks.map(n => <option key={n.id} value={n.id}>{n.name}</option>)}
-          </select>
+          {notebooks.length > 0 && (
+            <select
+              value={selectedNotebookId}
+              onChange={e => { setSelectedNotebookId(e.target.value); setNewNotebookName(''); }}
+              className="w-full bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] focus:outline-none focus:border-[#6c8aff]"
+            >
+              <option value="">— Select existing —</option>
+              {notebooks.map(n => <option key={n.id} value={n.id}>{n.name}</option>)}
+            </select>
+          )}
+          <input
+            type="text"
+            placeholder={notebooks.length > 0 ? 'Or type name to create new…' : 'Notebook name to create…'}
+            value={newNotebookName}
+            onChange={e => { setNewNotebookName(e.target.value); setSelectedNotebookId(''); }}
+            className="w-full mt-1 bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] placeholder-[#8b90a0] focus:outline-none focus:border-[#6c8aff]"
+          />
+          {creatingNotebook && <div className="text-[10px] text-[#8b90a0] mt-0.5">Creating notebook...</div>}
         </div>
       </div>
 

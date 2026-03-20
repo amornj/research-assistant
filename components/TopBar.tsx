@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useStore, getOrderedCitationMap } from '@/store/useStore';
 import { Citation } from '@/types';
 import { formatCitationEntry, CitationStyle } from '@/lib/citationFormatter';
@@ -64,7 +64,7 @@ function WritingSparkline({ log }: { log: { date: string; words: number }[] }) {
 }
 
 export default function TopBar({ onNewProject, theme, onThemeChange }: TopBarProps) {
-  const { projects, currentProjectId, selectProject, setWordCountGoal, updateWritingLog } = useStore();
+  const { projects, currentProjectId, selectProject, setWordCountGoal, updateWritingLog, updateProjectField } = useStore();
   const currentProject = useStore(s => s.currentProject);
   const [showExport, setShowExport] = useState(false);
   const [citationStyle, setCitationStyle] = useState<CitationStyle>('vancouver');
@@ -72,6 +72,9 @@ export default function TopBar({ onNewProject, theme, onThemeChange }: TopBarPro
   const [goalInputVal, setGoalInputVal] = useState('');
   const [showWritingLog, setShowWritingLog] = useState(false);
   const [showHamburger, setShowHamburger] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Compute total words from current project blocks
   const totalWords = (() => {
@@ -351,6 +354,17 @@ ${body}
     window.dispatchEvent(new CustomEvent('share-document'));
   };
 
+  const startNameEdit = () => {
+    setNameInput(currentProject?.name || '');
+    setEditingName(true);
+  };
+  const saveNameEdit = () => {
+    const trimmed = nameInput.trim();
+    if (trimmed && trimmed !== currentProject?.name) updateProjectField('name', trimmed);
+    setEditingName(false);
+  };
+  const cancelNameEdit = () => setEditingName(false);
+
   // Feature #5: Goal input
   const handleGoalSubmit = () => {
     const n = parseInt(goalInputVal, 10);
@@ -363,16 +377,40 @@ ${body}
   return (
     <div className="flex flex-col flex-shrink-0">
       <div className="flex items-center gap-2 px-3 py-2 bg-[#1a1d27] border-b border-[#2d3140] h-10">
-        <span className="text-[#6c8aff] font-semibold text-sm mr-2">Research Assistant</span>
+        <span className="text-[#6c8aff] font-semibold text-sm mr-2 hidden sm:inline">RA</span>
         <select
           value={currentProjectId || ''}
           onChange={e => selectProject(e.target.value)}
-          className="flex-1 max-w-xs bg-[#232733] border border-[#2d3140] text-[#e1e4ed] text-sm rounded px-2 py-1 focus:outline-none focus:border-[#6c8aff]"
+          className="bg-[#232733] border border-[#2d3140] text-[#e1e4ed] text-sm rounded px-2 py-1 focus:outline-none focus:border-[#6c8aff] max-w-[110px]"
         >
           {projects.length === 0 && <option value="">No projects</option>}
           {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
-        <button onClick={onNewProject} className="px-3 py-1 bg-[#6c8aff] hover:bg-[#5a78f0] text-white text-sm rounded transition-colors">
+        {/* Editable project name */}
+        {currentProject && (
+          editingName ? (
+            <input
+              autoFocus
+              value={nameInput}
+              onChange={e => setNameInput(e.target.value)}
+              onBlur={saveNameEdit}
+              onKeyDown={e => { if (e.key === 'Enter') saveNameEdit(); if (e.key === 'Escape') cancelNameEdit(); }}
+              className="flex-1 max-w-[200px] bg-[#232733] border border-[#6c8aff] text-[#e1e4ed] text-sm rounded px-2 py-1 focus:outline-none"
+            />
+          ) : (
+            <span
+              className="flex-1 max-w-[200px] text-sm text-[#e1e4ed] truncate cursor-pointer px-1 py-1 rounded hover:bg-[#232733] select-none"
+              title="Double-click to rename"
+              onDoubleClick={startNameEdit}
+              onTouchStart={() => { longPressTimer.current = setTimeout(startNameEdit, 500); }}
+              onTouchEnd={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+              onTouchMove={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+            >
+              {currentProject.name}
+            </span>
+          )
+        )}
+        <button onClick={onNewProject} className="px-3 py-1 bg-[#6c8aff] hover:bg-[#5a78f0] text-white text-sm rounded transition-colors flex-shrink-0">
           + New
         </button>
 
