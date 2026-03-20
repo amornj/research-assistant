@@ -5,15 +5,17 @@ import { useStore } from '@/store/useStore';
 import TopBar from './TopBar';
 import NotebookPane from './NotebookPane';
 import OutlinePanel from './OutlinePanel';
+import NotebookSourcePanel from './NotebookSourcePanel';
+import AIWritingTab from './AIWritingTab';
+import ZoteroTab from './ZoteroTab';
 import BlockEditor from './BlockEditor';
 import EditorToolbar from './EditorToolbar';
 import PdfViewer from './PdfViewer';
-import BottomPane from './BottomPane';
 import NewProjectModal from './NewProjectModal';
 import CommandPalette from './CommandPalette';
 
 interface PaneState {
-  mode: 'editor' | 'pdf';
+  mode: 'editor' | 'pdf' | 'zotero';
   pdfUrl?: string;
   pdfFilename?: string;
 }
@@ -22,11 +24,9 @@ export default function MainApp() {
   const { loadProjects, currentProject } = useStore();
   const [showNewProject, setShowNewProject] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [leftWidth, setLeftWidth] = useState(280);
-  const [bottomHeight, setBottomHeight] = useState(280);
-  const [leftTab, setLeftTab] = useState<'nlm' | 'outline'>('nlm');
+  const [leftWidth, setLeftWidth] = useState(320);
+  const [leftTab, setLeftTab] = useState<'nlm' | 'outline' | 'sources' | 'ai'>('nlm');
   const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [bottomCollapsed, setBottomCollapsed] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light' | 'system'>('dark');
 
   // Split view state
@@ -40,7 +40,6 @@ export default function MainApp() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingH = useRef(false);
-  const isDraggingV = useRef(false);
   const isDraggingSplit = useRef(false);
   const leftPdfInputRef = useRef<HTMLInputElement>(null);
   const rightPdfInputRef = useRef<HTMLInputElement>(null);
@@ -125,10 +124,8 @@ export default function MainApp() {
       const { active } = (e as CustomEvent).detail;
       if (active) {
         setLeftCollapsed(true);
-        setBottomCollapsed(true);
       } else {
         setLeftCollapsed(false);
-        setBottomCollapsed(false);
       }
     };
     window.addEventListener('focus-mode-change', handler);
@@ -142,11 +139,6 @@ export default function MainApp() {
       autoHideTimerRef.current = setTimeout(() => {
         setPanesAutoHidden(true);
       }, 10000);
-    };
-
-    const resetTimer = () => {
-      setPanesAutoHidden(false);
-      startTimer();
     };
 
     // Spacebar shows panes if not in a contentEditable
@@ -171,7 +163,6 @@ export default function MainApp() {
   const handlePaneMouseEnter = () => {
     if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
     setPanesAutoHidden(false);
-    // Restart timer after mouse leaves (handled in leave)
   };
 
   const handlePaneMouseLeave = () => {
@@ -184,12 +175,13 @@ export default function MainApp() {
   // Command palette actions
   useEffect(() => {
     const focusZotero = () => {
-      const event = new CustomEvent('bottom-tab-change', { detail: { tab: 'zotero' } });
-      window.dispatchEvent(event);
+      // Open Zotero in right pane with split view
+      setSplitView(true);
+      setRightPane({ mode: 'zotero' });
       setTimeout(() => {
         const input = document.querySelector('[data-zotero-search]') as HTMLInputElement;
         if (input) input.focus();
-      }, 100);
+      }, 150);
     };
     const focusNLM = () => {
       setLeftTab('nlm');
@@ -197,6 +189,9 @@ export default function MainApp() {
         const input = document.querySelector('[data-nlm-input]') as HTMLInputElement;
         if (input) input.focus();
       }, 100);
+    };
+    const focusAI = () => {
+      setLeftTab('ai');
     };
     const aiRewrite = () => {
       const focusedId = (window as any).__editorFocusedBlockId;
@@ -207,10 +202,12 @@ export default function MainApp() {
     };
     window.addEventListener('command-focus-zotero', focusZotero);
     window.addEventListener('command-focus-nlm', focusNLM);
+    window.addEventListener('command-focus-ai', focusAI);
     window.addEventListener('command-ai-rewrite', aiRewrite);
     return () => {
       window.removeEventListener('command-focus-zotero', focusZotero);
       window.removeEventListener('command-focus-nlm', focusNLM);
+      window.removeEventListener('command-focus-ai', focusAI);
       window.removeEventListener('command-ai-rewrite', aiRewrite);
     };
   }, []);
@@ -220,7 +217,6 @@ export default function MainApp() {
     const handleRoamExport = async (e: Event) => {
       const { title, content } = (e as CustomEvent).detail;
       try {
-        // Use Roam MCP to create page
         const event = new CustomEvent('mcp-roam-create', { detail: { title, content } });
         window.dispatchEvent(event);
         alert(`Exported to Roam: "${title}"\n\nNote: Connect Roam MCP to auto-create the page. For now, content is in clipboard.`);
@@ -262,26 +258,6 @@ export default function MainApp() {
     };
     const onUp = () => {
       isDraggingH.current = false;
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  };
-
-  const handleHorizontalDrag = (e: React.MouseEvent) => {
-    e.preventDefault();
-    isDraggingV.current = true;
-    const startY = e.clientY;
-    const startHeight = bottomHeight;
-    const containerH = containerRef.current?.clientHeight || 600;
-    const onMove = (me: MouseEvent) => {
-      if (!isDraggingV.current) return;
-      const delta = startY - me.clientY;
-      setBottomHeight(Math.max(150, Math.min(containerH - 200, startHeight + delta)));
-    };
-    const onUp = () => {
-      isDraggingV.current = false;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -337,6 +313,45 @@ export default function MainApp() {
     }
   };
 
+  const openZotero = (pane: 'left' | 'right') => {
+    if (pane === 'left') {
+      if (leftPane.pdfUrl) URL.revokeObjectURL(leftPane.pdfUrl);
+      setLeftPane({ mode: 'zotero' });
+    } else {
+      if (rightPane.pdfUrl) URL.revokeObjectURL(rightPane.pdfUrl);
+      setRightPane({ mode: 'zotero' });
+    }
+  };
+
+  const closeZotero = (pane: 'left' | 'right') => {
+    if (pane === 'left') {
+      setLeftPane({ mode: 'editor' });
+    } else {
+      setRightPane({ mode: 'editor' });
+    }
+  };
+
+  const renderPaneContent = (pane: PaneState) => {
+    if (pane.mode === 'pdf' && pane.pdfUrl) {
+      return <PdfViewer url={pane.pdfUrl} filename={pane.pdfFilename} />;
+    }
+    if (pane.mode === 'zotero') {
+      return (
+        <div className="flex-1 overflow-hidden min-h-0 flex flex-col">
+          <ZoteroTab />
+        </div>
+      );
+    }
+    return <BlockEditor />;
+  };
+
+  const leftTabClass = (tab: typeof leftTab) =>
+    `flex-1 px-2 py-1.5 text-xs font-medium transition-colors border-b-2 ${
+      leftTab === tab
+        ? 'border-[#6c8aff] text-[#6c8aff]'
+        : 'border-transparent text-[#8b90a0] hover:text-[#e1e4ed]'
+    }`;
+
   return (
     <div className="flex flex-col h-screen">
       {/* Hidden file inputs for PDF loading */}
@@ -365,39 +380,25 @@ export default function MainApp() {
 
       <TopBar onNewProject={() => setShowNewProject(true)} theme={theme} onThemeChange={setTheme} />
       <div ref={containerRef} className="flex flex-1 overflow-hidden">
-        {/* Left pane: NLM / Outline toggle */}
+        {/* Left pane: NLM / Outline / Sources / AI tabs */}
         <div
           style={{ width: (leftCollapsed || panesAutoHidden) ? 0 : leftWidth, minWidth: (leftCollapsed || panesAutoHidden) ? 0 : leftWidth }}
           className="flex flex-col overflow-hidden border-r border-[#2d3140] transition-[width] duration-200"
           onMouseEnter={handlePaneMouseEnter}
           onMouseLeave={handlePaneMouseLeave}
         >
-          {/* Left pane tab switcher (#15) */}
+          {/* Left pane tab switcher */}
           <div className="flex border-b border-[#2d3140] flex-shrink-0">
-            <button
-              onClick={() => setLeftTab('nlm')}
-              className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors border-b-2 ${
-                leftTab === 'nlm'
-                  ? 'border-[#6c8aff] text-[#6c8aff]'
-                  : 'border-transparent text-[#8b90a0] hover:text-[#e1e4ed]'
-              }`}
-            >
-              NotebookLM
-            </button>
-            <button
-              onClick={() => setLeftTab('outline')}
-              className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors border-b-2 ${
-                leftTab === 'outline'
-                  ? 'border-[#6c8aff] text-[#6c8aff]'
-                  : 'border-transparent text-[#8b90a0] hover:text-[#e1e4ed]'
-              }`}
-            >
-              Outline
-            </button>
+            <button onClick={() => setLeftTab('nlm')} className={leftTabClass('nlm')}>NLM</button>
+            <button onClick={() => setLeftTab('outline')} className={leftTabClass('outline')}>Outline</button>
+            <button onClick={() => setLeftTab('sources')} className={leftTabClass('sources')}>Sources</button>
+            <button onClick={() => setLeftTab('ai')} className={leftTabClass('ai')}>AI</button>
           </div>
           <div className="flex-1 overflow-hidden">
             {leftTab === 'nlm' && <NotebookPane />}
             {leftTab === 'outline' && <OutlinePanel />}
+            {leftTab === 'sources' && <NotebookSourcePanel />}
+            {leftTab === 'ai' && <AIWritingTab />}
           </div>
         </div>
         {/* Vertical resize handle + left-pane collapse toggle */}
@@ -414,101 +415,70 @@ export default function MainApp() {
             {leftCollapsed ? '›' : '‹'}
           </button>
         </div>
-        {/* Right: Editor + Bottom Pane */}
-        <div className="flex flex-col flex-1 overflow-hidden min-w-0">
-          {/* Editor area — split or single */}
-          <div className="flex flex-1 overflow-hidden min-h-0">
-            {splitView ? (
-              <>
-                {/* Left editor pane */}
-                <div
-                  className="flex flex-col overflow-hidden border-r border-[#2d3140]"
-                  style={{ width: splitEditorWidth, minWidth: splitEditorWidth }}
-                >
-                  <EditorToolbar
-                    showSplitToggle
-                    splitActive
-                    onSplitToggle={() => setSplitView(false)}
-                    paneMode={leftPane.mode}
-                    pdfFilename={leftPane.pdfFilename}
-                    onOpenPdf={() => openPdf('left')}
-                    onClosePdf={() => closePdf('left')}
-                  />
-                  <div className="flex-1 overflow-hidden min-h-0">
-                    {leftPane.mode === 'pdf' && leftPane.pdfUrl ? (
-                      <PdfViewer url={leftPane.pdfUrl} filename={leftPane.pdfFilename} />
-                    ) : (
-                      <BlockEditor />
-                    )}
-                  </div>
-                </div>
-                {/* Draggable split divider */}
-                <div
-                  className="w-1.5 flex-shrink-0 cursor-col-resize bg-[#2d3140] hover:bg-[#6c8aff] transition-colors"
-                  onMouseDown={handleSplitDrag}
-                  title="Drag to resize panes"
-                />
-                {/* Right editor pane */}
-                <div className="flex flex-col flex-1 overflow-hidden min-w-0">
-                  <EditorToolbar
-                    paneMode={rightPane.mode}
-                    pdfFilename={rightPane.pdfFilename}
-                    onOpenPdf={() => openPdf('right')}
-                    onClosePdf={() => closePdf('right')}
-                  />
-                  <div className="flex-1 overflow-hidden min-h-0">
-                    {rightPane.mode === 'pdf' && rightPane.pdfUrl ? (
-                      <PdfViewer url={rightPane.pdfUrl} filename={rightPane.pdfFilename} />
-                    ) : (
-                      <BlockEditor />
-                    )}
-                  </div>
-                </div>
-              </>
-            ) : (
-              /* Single pane */
-              <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+        {/* Editor area — split or single, takes full vertical space */}
+        <div className="flex flex-1 overflow-hidden min-w-0 min-h-0">
+          {splitView ? (
+            <>
+              {/* Left editor pane */}
+              <div
+                className="flex flex-col overflow-hidden border-r border-[#2d3140]"
+                style={{ width: splitEditorWidth, minWidth: splitEditorWidth }}
+              >
                 <EditorToolbar
                   showSplitToggle
-                  splitActive={false}
-                  onSplitToggle={() => setSplitView(true)}
+                  splitActive
+                  onSplitToggle={() => setSplitView(false)}
                   paneMode={leftPane.mode}
                   pdfFilename={leftPane.pdfFilename}
                   onOpenPdf={() => openPdf('left')}
                   onClosePdf={() => closePdf('left')}
+                  onOpenZotero={() => openZotero('left')}
+                  onCloseZotero={() => closeZotero('left')}
                 />
                 <div className="flex-1 overflow-hidden min-h-0">
-                  {leftPane.mode === 'pdf' && leftPane.pdfUrl ? (
-                    <PdfViewer url={leftPane.pdfUrl} filename={leftPane.pdfFilename} />
-                  ) : (
-                    <BlockEditor />
-                  )}
+                  {renderPaneContent(leftPane)}
                 </div>
               </div>
-            )}
-          </div>
-          {/* Horizontal resize handle + bottom-pane collapse toggle */}
-          <div className="relative flex-shrink-0 h-5 flex items-center justify-center bg-[#2d3140] hover:bg-[#3d4160] transition-colors group/hhandle">
-            {!bottomCollapsed && (
-              <div className="absolute inset-0 cursor-row-resize" onMouseDown={handleHorizontalDrag} />
-            )}
-            <button
-              onClick={() => setBottomCollapsed(v => !v)}
-              onMouseDown={e => e.stopPropagation()}
-              className="relative z-10 h-5 w-10 flex items-center justify-center text-[#8b90a0] hover:text-white text-[10px] leading-none select-none"
-              title={bottomCollapsed ? 'Expand panel' : 'Collapse panel'}
-            >
-              {bottomCollapsed ? '∧' : '∨'}
-            </button>
-          </div>
-          <div
-            style={{ height: (bottomCollapsed || panesAutoHidden) ? 0 : bottomHeight, minHeight: (bottomCollapsed || panesAutoHidden) ? 0 : bottomHeight }}
-            className="flex-shrink-0 overflow-hidden border-t border-[#2d3140] transition-[height] duration-200"
-            onMouseEnter={handlePaneMouseEnter}
-            onMouseLeave={handlePaneMouseLeave}
-          >
-            <BottomPane />
-          </div>
+              {/* Draggable split divider */}
+              <div
+                className="w-1.5 flex-shrink-0 cursor-col-resize bg-[#2d3140] hover:bg-[#6c8aff] transition-colors"
+                onMouseDown={handleSplitDrag}
+                title="Drag to resize panes"
+              />
+              {/* Right editor pane */}
+              <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+                <EditorToolbar
+                  paneMode={rightPane.mode}
+                  pdfFilename={rightPane.pdfFilename}
+                  onOpenPdf={() => openPdf('right')}
+                  onClosePdf={() => closePdf('right')}
+                  onOpenZotero={() => openZotero('right')}
+                  onCloseZotero={() => closeZotero('right')}
+                />
+                <div className="flex-1 overflow-hidden min-h-0">
+                  {renderPaneContent(rightPane)}
+                </div>
+              </div>
+            </>
+          ) : (
+            /* Single pane */
+            <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+              <EditorToolbar
+                showSplitToggle
+                splitActive={false}
+                onSplitToggle={() => setSplitView(true)}
+                paneMode={leftPane.mode}
+                pdfFilename={leftPane.pdfFilename}
+                onOpenPdf={() => openPdf('left')}
+                onClosePdf={() => closePdf('left')}
+                onOpenZotero={() => openZotero('left')}
+                onCloseZotero={() => closeZotero('left')}
+              />
+              <div className="flex-1 overflow-hidden min-h-0">
+                {renderPaneContent(leftPane)}
+              </div>
+            </div>
+          )}
         </div>
       </div>
       {showNewProject && (

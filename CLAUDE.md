@@ -52,22 +52,25 @@ app/
     ai/rewrite/           — POST: rewrite block (context-aware)
     ai/general/           — POST: general AI Q&A (documentContext param)
 components/
-  MainApp.tsx             — 3-pane layout, resizable dividers, Cmd+K, Roam/Notion export events
+  MainApp.tsx             — 2-pane layout (left sidebar + editor area), resizable dividers, Cmd+K, Roam/Notion export events; no bottom pane
   TopBar.tsx              — project selector, citation style selector (#1), export menu
   NotebookPane.tsx        — NLM chat, capture-as-block (#11), follow-up suggestions (#14)
+                            (left sidebar NLM tab)
   OutlinePanel.tsx        — live h1/h2/h3 document outline, click-to-scroll (#15)
+                            (left sidebar Outline tab)
   NotebookSourcePanel.tsx — NLM source list with "Add to Zotero search" (#19)
+                            (left sidebar Sources tab)
   BlockEditor.tsx         — THE CORE: contentEditable blocks, DnD, versions, AI popup,
                             word count (#5), coherence check (#2), PDF drop (#16),
                             paste detection (#18), citation badges with DOI/annotation (#6/#8)
-  EditorToolbar.tsx       — execCommand formatting toolbar
+  EditorToolbar.tsx       — execCommand formatting toolbar + alignment buttons; PDF/Zotero pane controls
   BlockAIPopup.tsx        — floating AI rewrite: style presets, Argue/Synthesize/Contrast (#3),
                             contextual rewrite (#4), multi-block synthesis
-  BottomPane.tsx          — tabbed: AI Writing | Zotero | NLM Sources
   AIWritingTab.tsx        — general chat + document-context toggle (#12), model selector
+                            (rendered in left sidebar AI tab)
   ZoteroTab.tsx           — Zotero search (collection-scoped #10), 📎 Cite, CrossRef fill (#7),
                             DOI badge (#6), duplicate warning (#9), citation annotator (#8),
-                            URL import (#17)
+                            URL import (#17) — rendered in editor panes (mode: 'zotero')
   CommandPalette.tsx      — Cmd+K palette: switch project, insert block, export, search, rewrite (#13)
   NewProjectModal.tsx     — project creation dialog
 lib/
@@ -113,7 +116,7 @@ interface Project {
 - `contentEditable` blocks use refs (not controlled state) — set innerHTML on mount/version-switch, read on blur
 - Insert-to-editor uses `window.__insertToEditor` as a cross-component bridge
 - Editor focused block tracked via `window.__editorFocusedBlockId`
-- Cross-component events via `CustomEvent` on `window`: `command-focus-zotero`, `command-focus-nlm`, `command-ai-rewrite`, `command-export`, `bottom-tab-change`, `trigger-ai-rewrite`, `zotero-search`, `zotero-add-item`, `export-to-roam`, `export-to-notion`
+- Cross-component events via `CustomEvent` on `window`: `command-focus-zotero` (opens Zotero in right split pane), `command-focus-nlm`, `command-focus-ai` (switches left sidebar to AI tab), `command-ai-rewrite`, `command-export`, `trigger-ai-rewrite`, `zotero-search`, `zotero-add-item`, `export-to-roam`, `export-to-notion`
 - Auto-save debounced 500ms to localStorage on block changes
 - Export: client-side Markdown and HTML (no pandoc); Roam/Notion via clipboard + MCP events
 - Citation style (Vancouver/APA/MLA/Chicago) selected in TopBar, applied on export

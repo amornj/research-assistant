@@ -49,6 +49,12 @@ export default function CommandPalette({ onClose, onNewProject }: Props) {
     onClose();
   };
 
+  const doFocusAI = () => {
+    const event = new CustomEvent('command-focus-ai');
+    window.dispatchEvent(event);
+    onClose();
+  };
+
   const doQueryNLM = () => {
     const event = new CustomEvent('command-focus-nlm');
     window.dispatchEvent(event);
@@ -72,8 +78,9 @@ export default function CommandPalette({ onClose, onNewProject }: Props) {
     { id: 'insert-block', label: '↵ Insert Block', description: 'Add a new block at end', action: doInsertBlock },
     { id: 'export-md', label: '⬇ Export Markdown', description: 'Download as .md file', action: doExportMarkdown },
     { id: 'export-html', label: '⬇ Export HTML', description: 'Download as .html file', action: doExportHtml },
-    { id: 'search-zotero', label: '🔍 Search Zotero', description: 'Focus Zotero search tab', action: doSearchZotero },
+    { id: 'search-zotero', label: '🔍 Search Zotero', description: 'Open Zotero in split pane', action: doSearchZotero },
     { id: 'query-nlm', label: '📚 Query NotebookLM', description: 'Focus NotebookLM input', action: doQueryNLM },
+    { id: 'focus-ai', label: '✨ AI Writing', description: 'Switch to AI Writing tab', action: doFocusAI },
     { id: 'ai-rewrite', label: '✨ AI Rewrite Current Block', description: 'Open AI rewrite popup for focused block', action: doAIRewrite },
   ];
 

@@ -19,13 +19,21 @@ const buttons: ToolbarButton[] = [
   { label: '" Quote', command: 'formatBlock', value: 'blockquote', title: 'Blockquote' },
 ];
 
+const alignButtons: ToolbarButton[] = [
+  { label: '⇐', command: 'justifyLeft', title: 'Align Left' },
+  { label: '⇔', command: 'justifyCenter', title: 'Align Center' },
+  { label: '⇒', command: 'justifyRight', title: 'Align Right' },
+];
+
 export interface EditorToolbarProps {
   showSplitToggle?: boolean;
   splitActive?: boolean;
   onSplitToggle?: () => void;
   onOpenPdf?: () => void;
   onClosePdf?: () => void;
-  paneMode?: 'editor' | 'pdf';
+  onOpenZotero?: () => void;
+  onCloseZotero?: () => void;
+  paneMode?: 'editor' | 'pdf' | 'zotero';
   pdfFilename?: string;
 }
 
@@ -35,6 +43,8 @@ export default function EditorToolbar({
   onSplitToggle,
   onOpenPdf,
   onClosePdf,
+  onOpenZotero,
+  onCloseZotero,
   paneMode = 'editor',
   pdfFilename,
 }: EditorToolbarProps) {
@@ -59,10 +69,28 @@ export default function EditorToolbar({
               {btn.label}
             </button>
           ))}
+          <span className="text-[#2d3140] mx-0.5">|</span>
+          {alignButtons.map((btn, i) => (
+            <button
+              key={i}
+              title={btn.title}
+              onMouseDown={e => {
+                e.preventDefault();
+                execCommand(btn.command);
+              }}
+              className="px-2 py-0.5 text-xs rounded hover:bg-[#2d3140] text-[#8b90a0] hover:text-[#e1e4ed] transition-colors font-medium"
+            >
+              {btn.label}
+            </button>
+          ))}
         </>
-      ) : (
+      ) : paneMode === 'pdf' ? (
         <span className="text-xs text-[#8b90a0] truncate max-w-[220px]" title={pdfFilename}>
           📄 {pdfFilename || 'PDF Viewer'}
+        </span>
+      ) : (
+        <span className="text-xs text-[#8b90a0]">
+          📚 Zotero
         </span>
       )}
 
@@ -78,6 +106,16 @@ export default function EditorToolbar({
         </button>
       )}
 
+      {paneMode === 'zotero' && onCloseZotero && (
+        <button
+          onClick={onCloseZotero}
+          title="Close Zotero and return to editor"
+          className="px-2 py-0.5 text-xs rounded hover:bg-[#2d3140] text-[#8b90a0] hover:text-[#e1e4ed] transition-colors"
+        >
+          ✕ Close
+        </button>
+      )}
+
       {paneMode === 'editor' && onOpenPdf && (
         <button
           onClick={onOpenPdf}
@@ -85,6 +123,16 @@ export default function EditorToolbar({
           className="px-2 py-0.5 text-xs rounded hover:bg-[#2d3140] text-[#8b90a0] hover:text-[#e1e4ed] transition-colors"
         >
           📄 PDF
+        </button>
+      )}
+
+      {paneMode === 'editor' && onOpenZotero && (
+        <button
+          onClick={onOpenZotero}
+          title="Open Zotero in this pane"
+          className="px-2 py-0.5 text-xs rounded hover:bg-[#2d3140] text-[#8b90a0] hover:text-[#e1e4ed] transition-colors"
+        >
+          📚 Zotero
         </button>
       )}
 
