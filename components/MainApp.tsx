@@ -7,9 +7,16 @@ import NotebookPane from './NotebookPane';
 import OutlinePanel from './OutlinePanel';
 import BlockEditor from './BlockEditor';
 import EditorToolbar from './EditorToolbar';
+import PdfViewer from './PdfViewer';
 import BottomPane from './BottomPane';
 import NewProjectModal from './NewProjectModal';
 import CommandPalette from './CommandPalette';
+
+interface PaneState {
+  mode: 'editor' | 'pdf';
+  pdfUrl?: string;
+  pdfFilename?: string;
+}
 
 export default function MainApp() {
   const { loadProjects, currentProject } = useStore();
@@ -21,9 +28,19 @@ export default function MainApp() {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [bottomCollapsed, setBottomCollapsed] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light' | 'system'>('dark');
+
+  // Split view state
+  const [splitView, setSplitView] = useState(false);
+  const [splitEditorWidth, setSplitEditorWidth] = useState(600);
+  const [leftPane, setLeftPane] = useState<PaneState>({ mode: 'editor' });
+  const [rightPane, setRightPane] = useState<PaneState>({ mode: 'editor' });
+
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingH = useRef(false);
   const isDraggingV = useRef(false);
+  const isDraggingSplit = useRef(false);
+  const leftPdfInputRef = useRef<HTMLInputElement>(null);
+  const rightPdfInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadProjects();
@@ -175,6 +192,14 @@ export default function MainApp() {
     };
   }, []);
 
+  // Revoke blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      if (leftPane.pdfUrl) URL.revokeObjectURL(leftPane.pdfUrl);
+      if (rightPane.pdfUrl) URL.revokeObjectURL(rightPane.pdfUrl);
+    };
+  }, []);
+
   const handleVerticalDrag = (e: React.MouseEvent) => {
     e.preventDefault();
     isDraggingH.current = true;
@@ -214,8 +239,80 @@ export default function MainApp() {
     window.addEventListener('mouseup', onUp);
   };
 
+  const handleSplitDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingSplit.current = true;
+    const startX = e.clientX;
+    const startWidth = splitEditorWidth;
+    const onMove = (me: MouseEvent) => {
+      if (!isDraggingSplit.current) return;
+      const delta = me.clientX - startX;
+      setSplitEditorWidth(Math.max(300, startWidth + delta));
+    };
+    const onUp = () => {
+      isDraggingSplit.current = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const openPdf = (pane: 'left' | 'right') => {
+    if (pane === 'left') {
+      leftPdfInputRef.current?.click();
+    } else {
+      rightPdfInputRef.current?.click();
+    }
+  };
+
+  const loadPdfFile = (pane: 'left' | 'right', file: File) => {
+    const url = URL.createObjectURL(file);
+    if (pane === 'left') {
+      if (leftPane.pdfUrl) URL.revokeObjectURL(leftPane.pdfUrl);
+      setLeftPane({ mode: 'pdf', pdfUrl: url, pdfFilename: file.name });
+    } else {
+      if (rightPane.pdfUrl) URL.revokeObjectURL(rightPane.pdfUrl);
+      setRightPane({ mode: 'pdf', pdfUrl: url, pdfFilename: file.name });
+    }
+  };
+
+  const closePdf = (pane: 'left' | 'right') => {
+    if (pane === 'left') {
+      if (leftPane.pdfUrl) URL.revokeObjectURL(leftPane.pdfUrl);
+      setLeftPane({ mode: 'editor' });
+    } else {
+      if (rightPane.pdfUrl) URL.revokeObjectURL(rightPane.pdfUrl);
+      setRightPane({ mode: 'editor' });
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen">
+      {/* Hidden file inputs for PDF loading */}
+      <input
+        ref={leftPdfInputRef}
+        type="file"
+        accept=".pdf,application/pdf"
+        className="hidden"
+        onChange={e => {
+          const file = e.target.files?.[0];
+          if (file) loadPdfFile('left', file);
+          e.target.value = '';
+        }}
+      />
+      <input
+        ref={rightPdfInputRef}
+        type="file"
+        accept=".pdf,application/pdf"
+        className="hidden"
+        onChange={e => {
+          const file = e.target.files?.[0];
+          if (file) loadPdfFile('right', file);
+          e.target.value = '';
+        }}
+      />
+
       <TopBar onNewProject={() => setShowNewProject(true)} theme={theme} onThemeChange={setTheme} />
       <div ref={containerRef} className="flex flex-1 overflow-hidden">
         {/* Left pane: NLM / Outline toggle */}
@@ -266,10 +363,77 @@ export default function MainApp() {
           </button>
         </div>
         {/* Right: Editor + Bottom Pane */}
-        <div className="flex flex-col flex-1 overflow-hidden">
-          <EditorToolbar />
-          <div className="flex-1 overflow-hidden" style={{ height: `calc(100% - ${bottomCollapsed ? 0 : bottomHeight}px - 20px - 40px)` }}>
-            <BlockEditor />
+        <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+          {/* Editor area — split or single */}
+          <div className="flex flex-1 overflow-hidden min-h-0">
+            {splitView ? (
+              <>
+                {/* Left editor pane */}
+                <div
+                  className="flex flex-col overflow-hidden border-r border-[#2d3140]"
+                  style={{ width: splitEditorWidth, minWidth: splitEditorWidth }}
+                >
+                  <EditorToolbar
+                    showSplitToggle
+                    splitActive
+                    onSplitToggle={() => setSplitView(false)}
+                    paneMode={leftPane.mode}
+                    pdfFilename={leftPane.pdfFilename}
+                    onOpenPdf={() => openPdf('left')}
+                    onClosePdf={() => closePdf('left')}
+                  />
+                  <div className="flex-1 overflow-hidden min-h-0">
+                    {leftPane.mode === 'pdf' && leftPane.pdfUrl ? (
+                      <PdfViewer url={leftPane.pdfUrl} filename={leftPane.pdfFilename} />
+                    ) : (
+                      <BlockEditor />
+                    )}
+                  </div>
+                </div>
+                {/* Draggable split divider */}
+                <div
+                  className="w-1.5 flex-shrink-0 cursor-col-resize bg-[#2d3140] hover:bg-[#6c8aff] transition-colors"
+                  onMouseDown={handleSplitDrag}
+                  title="Drag to resize panes"
+                />
+                {/* Right editor pane */}
+                <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+                  <EditorToolbar
+                    paneMode={rightPane.mode}
+                    pdfFilename={rightPane.pdfFilename}
+                    onOpenPdf={() => openPdf('right')}
+                    onClosePdf={() => closePdf('right')}
+                  />
+                  <div className="flex-1 overflow-hidden min-h-0">
+                    {rightPane.mode === 'pdf' && rightPane.pdfUrl ? (
+                      <PdfViewer url={rightPane.pdfUrl} filename={rightPane.pdfFilename} />
+                    ) : (
+                      <BlockEditor />
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* Single pane */
+              <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+                <EditorToolbar
+                  showSplitToggle
+                  splitActive={false}
+                  onSplitToggle={() => setSplitView(true)}
+                  paneMode={leftPane.mode}
+                  pdfFilename={leftPane.pdfFilename}
+                  onOpenPdf={() => openPdf('left')}
+                  onClosePdf={() => closePdf('left')}
+                />
+                <div className="flex-1 overflow-hidden min-h-0">
+                  {leftPane.mode === 'pdf' && leftPane.pdfUrl ? (
+                    <PdfViewer url={leftPane.pdfUrl} filename={leftPane.pdfFilename} />
+                  ) : (
+                    <BlockEditor />
+                  )}
+                </div>
+              </div>
+            )}
           </div>
           {/* Horizontal resize handle + bottom-pane collapse toggle */}
           <div className="relative flex-shrink-0 h-5 flex items-center justify-center bg-[#2d3140] hover:bg-[#3d4160] transition-colors group/hhandle">

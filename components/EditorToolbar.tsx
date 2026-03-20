@@ -19,26 +19,88 @@ const buttons: ToolbarButton[] = [
   { label: '" Quote', command: 'formatBlock', value: 'blockquote', title: 'Blockquote' },
 ];
 
-export default function EditorToolbar() {
+export interface EditorToolbarProps {
+  showSplitToggle?: boolean;
+  splitActive?: boolean;
+  onSplitToggle?: () => void;
+  onOpenPdf?: () => void;
+  onClosePdf?: () => void;
+  paneMode?: 'editor' | 'pdf';
+  pdfFilename?: string;
+}
+
+export default function EditorToolbar({
+  showSplitToggle,
+  splitActive,
+  onSplitToggle,
+  onOpenPdf,
+  onClosePdf,
+  paneMode = 'editor',
+  pdfFilename,
+}: EditorToolbarProps) {
   const execCommand = (command: string, value?: string) => {
     document.execCommand(command, false, value);
   };
 
   return (
     <div className="flex items-center gap-1 px-3 py-1.5 bg-[#1a1d27] border-b border-[#2d3140] flex-shrink-0 flex-wrap">
-      {buttons.map((btn, i) => (
+      {paneMode === 'editor' ? (
+        <>
+          {buttons.map((btn, i) => (
+            <button
+              key={i}
+              title={btn.title}
+              onMouseDown={e => {
+                e.preventDefault();
+                execCommand(btn.command, btn.value);
+              }}
+              className="px-2 py-0.5 text-xs rounded hover:bg-[#2d3140] text-[#8b90a0] hover:text-[#e1e4ed] transition-colors font-medium"
+            >
+              {btn.label}
+            </button>
+          ))}
+        </>
+      ) : (
+        <span className="text-xs text-[#8b90a0] truncate max-w-[220px]" title={pdfFilename}>
+          📄 {pdfFilename || 'PDF Viewer'}
+        </span>
+      )}
+
+      <div className="flex-1" />
+
+      {paneMode === 'pdf' && onClosePdf && (
         <button
-          key={i}
-          title={btn.title}
-          onMouseDown={e => {
-            e.preventDefault(); // Don't lose focus
-            execCommand(btn.command, btn.value);
-          }}
-          className="px-2 py-0.5 text-xs rounded hover:bg-[#2d3140] text-[#8b90a0] hover:text-[#e1e4ed] transition-colors font-medium"
+          onClick={onClosePdf}
+          title="Close PDF and return to editor"
+          className="px-2 py-0.5 text-xs rounded hover:bg-[#2d3140] text-[#8b90a0] hover:text-[#e1e4ed] transition-colors"
         >
-          {btn.label}
+          ✕ Close
         </button>
-      ))}
+      )}
+
+      {paneMode === 'editor' && onOpenPdf && (
+        <button
+          onClick={onOpenPdf}
+          title="Open a PDF in this pane"
+          className="px-2 py-0.5 text-xs rounded hover:bg-[#2d3140] text-[#8b90a0] hover:text-[#e1e4ed] transition-colors"
+        >
+          📄 PDF
+        </button>
+      )}
+
+      {showSplitToggle && onSplitToggle && (
+        <button
+          onClick={onSplitToggle}
+          title={splitActive ? 'Close split view' : 'Split editor view'}
+          className={`px-2 py-0.5 text-xs rounded transition-colors font-medium ${
+            splitActive
+              ? 'bg-[#6c8aff] text-white hover:bg-[#5a78ed]'
+              : 'hover:bg-[#2d3140] text-[#8b90a0] hover:text-[#e1e4ed]'
+          }`}
+        >
+          ⊞ Split
+        </button>
+      )}
     </div>
   );
 }
