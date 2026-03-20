@@ -47,6 +47,10 @@ export interface Block {
   blockComments?: BlockComment[];
   /** Feature #17: frozen block (read-only) */
   frozen?: boolean;
+  /** Outliner: indent level — 0=root (parent), 1=child, 2=grandchild */
+  indentLevel?: 0 | 1 | 2;
+  /** Outliner: collapsed state — hides children and shows only first line */
+  collapsed?: boolean;
 }
 
 export interface ChatMessage {

@@ -458,6 +458,7 @@ interface BlockItemProps {
   onDragLeave: (e: React.DragEvent) => void;
   dropTargetId: string | null;
   dropPosition: 'before' | 'after' | null;
+  dropIndentLevel: 0 | 1 | 2 | null;
   onShowContextMenu: (blockId: string, pos: { top: number; left: number }) => void;
   onSwitchVersion: (id: string, idx: number) => void;
   onDeleteVersion: (id: string, versionIndex: number) => void;
@@ -471,6 +472,7 @@ interface BlockItemProps {
   onRemoveCitation: (blockId: string, citationId: string) => void;
   collapsed: boolean;
   onToggleCollapse: (id: string, allBlocks: boolean) => void;
+  hasOutlinerChildren: boolean;
   // Feature #2: Section folding
   isSectionHeading: boolean;
   sectionFolded: boolean;
@@ -487,10 +489,10 @@ interface BlockItemProps {
 
 function BlockItem({
   block, blockIndex, isAnimated, isRelated, onCompare, isFirst, onFocus, onBlur, onKeyDown, onPaste,
-  onDragStart, onDragOver, onDrop, onDragLeave, dropTargetId, dropPosition, onShowContextMenu,
-  onSwitchVersion, onDeleteVersion, focusedId, citationMap, projectCitations, cmdMode,
+  onDragStart, onDragOver, onDrop, onDragLeave, dropTargetId, dropPosition, dropIndentLevel,
+  onShowContextMenu, onSwitchVersion, onDeleteVersion, focusedId, citationMap, projectCitations, cmdMode,
   isSelected, onToggleSelect, draggedId, onRemoveCitation, collapsed, onToggleCollapse,
-  isSectionHeading, sectionFolded, onToggleSectionFold, focusMode, onDeleteComment,
+  hasOutlinerChildren, isSectionHeading, sectionFolded, onToggleSectionFold, focusMode, onDeleteComment,
   onBlockLinkClick, onViewTimeline,
 }: BlockItemProps) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -570,7 +572,10 @@ function BlockItem({
         {blockIndex + 1}
       </div>
       {/* Drop indicator before */}
-      <div className={`drop-indicator ${isDropBefore && !cmdMode ? 'active' : ''}`} />
+      <div
+        className={`drop-indicator ${isDropBefore && !cmdMode ? 'active' : ''}`}
+        style={isDropBefore && !cmdMode && dropIndentLevel != null ? { marginLeft: dropIndentLevel * 24 } : undefined}
+      />
       <div
         className={`flex items-start gap-1 px-4 py-0.5 rounded transition-colors ${
           collapsed ? 'border-b border-[#2d3140]/60' : ''
@@ -612,17 +617,23 @@ function BlockItem({
           </button>
         )}
 
-        {/* Collapse triangle */}
-        <button
-          className={`flex-shrink-0 mt-1.5 text-[9px] leading-none select-none transition-all text-[#71717a] hover:text-[#a1a1aa] ${
-            collapsed ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }`}
-          style={{ width: 10 }}
-          onClick={e => { e.stopPropagation(); onToggleCollapse(block.id, e.metaKey || e.ctrlKey); }}
-          title={collapsed ? 'Expand block' : 'Collapse block'}
-        >
-          {collapsed ? '▶' : '▼'}
-        </button>
+        {/* Collapse triangle — only show on parent blocks (those with children) or already collapsed */}
+        {(hasOutlinerChildren || collapsed) && (
+          <button
+            className={`flex-shrink-0 mt-1.5 text-[9px] leading-none select-none transition-all text-[#71717a] hover:text-[#a1a1aa] ${
+              collapsed ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }`}
+            style={{ width: 10 }}
+            onClick={e => { e.stopPropagation(); onToggleCollapse(block.id, e.metaKey || e.ctrlKey); }}
+            title={collapsed ? 'Expand block (expand children)' : 'Collapse block (hide children)'}
+          >
+            {collapsed ? '▶' : '▼'}
+          </button>
+        )}
+        {/* Spacer when no collapse triangle */}
+        {!hasOutlinerChildren && !collapsed && (
+          <span style={{ width: 10, flexShrink: 0, display: 'inline-block' }} />
+        )}
 
         {/* Drag handle */}
         <div
@@ -742,7 +753,10 @@ function BlockItem({
         </div>
       </div>
       {/* Drop indicator after */}
-      <div className={`drop-indicator ${isDropAfter && !cmdMode ? 'active' : ''}`} />
+      <div
+        className={`drop-indicator ${isDropAfter && !cmdMode ? 'active' : ''}`}
+        style={isDropAfter && !cmdMode && dropIndentLevel != null ? { marginLeft: dropIndentLevel * 24 } : undefined}
+      />
     </div>
   );
 }
@@ -752,7 +766,7 @@ export default function BlockEditor() {
     currentProject, updateBlock, deleteBlock, addBlock, moveBlock, mergeBlocks, splitBlock,
     addBlockVersion, switchBlockVersion, deleteBlockVersion, setFocusedBlockId,
     removeCitationFromBlock, setBlockType, addBlockComment, deleteBlockComment, toggleBlockFrozen,
-    updateWritingLog,
+    updateWritingLog, setBlockIndent, toggleBlockCollapsed, setBlocksCollapsedAll, moveBlockFamily,
   } = useStore();
 
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -768,7 +782,7 @@ export default function BlockEditor() {
   const [compareMode, setCompareMode] = useState<{ blockId: string; versionIndex: number } | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [animatedBlockId, setAnimatedBlockId] = useState<string | null>(null);
-  const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(new Set());
+  const [dropIndentLevel, setDropIndentLevel] = useState<0 | 1 | 2 | null>(null);
   const [pendingBatchDelete, setPendingBatchDelete] = useState(false);
   const [batchRewriteMode, setBatchRewriteMode] = useState(false);
   const [batchInstruction, setBatchInstruction] = useState('');
@@ -976,12 +990,37 @@ export default function BlockEditor() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, id: string, html: string) => {
+    // Outliner Tab / Shift+Tab indent
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const blockIdx = blocks.findIndex(b => b.id === id);
+      if (blockIdx === -1) return;
+      const block = blocks[blockIdx];
+      const currentLevel = block.indentLevel ?? 0;
+      if (!e.shiftKey) {
+        // Indent: allowed when prev block's level >= currentLevel
+        const prevBlock = blockIdx > 0 ? blocks[blockIdx - 1] : null;
+        const prevLevel = prevBlock?.indentLevel ?? 0;
+        if (currentLevel < 2 && prevLevel >= currentLevel) {
+          updateBlock(id, html);
+          setBlockIndent(id, (currentLevel + 1) as 0 | 1 | 2);
+        }
+      } else {
+        // Outdent
+        if (currentLevel > 0) {
+          updateBlock(id, html);
+          setBlockIndent(id, (currentLevel - 1) as 0 | 1 | 2);
+        }
+      }
+      return;
+    }
+
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
       e.preventDefault();
       updateBlock(id, html);
       const blockIdx = blocks.findIndex(b => b.id === id);
-      if (e.key === 'ArrowUp' && blockIdx > 0) { moveBlock(id, blocks[blockIdx - 1].id, 'before'); pendingFocusId.current = id; }
-      else if (e.key === 'ArrowDown' && blockIdx < blocks.length - 1) { moveBlock(id, blocks[blockIdx + 1].id, 'after'); pendingFocusId.current = id; }
+      if (e.key === 'ArrowUp' && blockIdx > 0) { moveBlockFamily(id, blocks[blockIdx - 1].id, 'before'); pendingFocusId.current = id; }
+      else if (e.key === 'ArrowDown' && blockIdx < blocks.length - 1) { moveBlockFamily(id, blocks[blockIdx + 1].id, 'after'); pendingFocusId.current = id; }
       return;
     }
 
@@ -1011,7 +1050,8 @@ export default function BlockEditor() {
       }
       e.preventDefault();
       updateBlock(id, html);
-      const newBlock = addBlock('', id);
+      const currentBlock = blocks.find(b => b.id === id);
+      const newBlock = addBlock('', id, currentBlock?.indentLevel ?? 0);
       pendingFocusId.current = newBlock.id;
     } else if (e.key === 'Backspace') {
       const el = e.currentTarget as HTMLDivElement;
@@ -1074,6 +1114,13 @@ export default function BlockEditor() {
     const midY = rect.top + rect.height / 2;
     setDropTargetId(id);
     setDropPosition(e.clientY < midY ? 'before' : 'after');
+    // Compute suggested indent level from horizontal mouse position
+    const targetBlock = blocks.find(b => b.id === id);
+    const targetLevel = targetBlock?.indentLevel ?? 0;
+    const relX = e.clientX - rect.left;
+    // Suggest child if mouse is 40+px to the right of the target's left edge
+    const suggested = relX > 40 && targetLevel < 2 ? (targetLevel + 1) as 0 | 1 | 2 : targetLevel as 0 | 1 | 2;
+    setDropIndentLevel(suggested);
   };
 
   const handleDrop = (e: React.DragEvent, targetId: string) => {
@@ -1094,19 +1141,22 @@ export default function BlockEditor() {
           };
           reader.readAsDataURL(file);
         });
-        setDraggedId(null); setDropTargetId(null); setDropPosition(null);
+        setDraggedId(null); setDropTargetId(null); setDropPosition(null); setDropIndentLevel(null);
         return;
       }
     }
     if (draggedId && targetId !== draggedId) {
-      if (e.metaKey) mergeBlocks([draggedId, targetId]);
-      else if (dropPosition) moveBlock(draggedId, targetId, dropPosition);
+      if (e.metaKey) {
+        mergeBlocks([draggedId, targetId]);
+      } else if (dropPosition) {
+        moveBlockFamily(draggedId, targetId, dropPosition, dropIndentLevel ?? undefined);
+      }
     }
-    setDraggedId(null); setDropTargetId(null); setDropPosition(null);
+    setDraggedId(null); setDropTargetId(null); setDropPosition(null); setDropIndentLevel(null);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
-    setDropTargetId(null); setDropPosition(null);
+    setDropTargetId(null); setDropPosition(null); setDropIndentLevel(null);
   };
 
   const handleEditorDragOver = (e: React.DragEvent) => {
@@ -1380,19 +1430,12 @@ export default function BlockEditor() {
 
   const handleToggleCollapse = useCallback((id: string, allBlocks: boolean) => {
     if (allBlocks) {
-      setCollapsedBlockIds(prev => {
-        const allCollapsed = blocks.every(b => prev.has(b.id));
-        return allCollapsed ? new Set() : new Set(blocks.map(b => b.id));
-      });
+      const allCollapsed = blocks.every(b => b.collapsed);
+      setBlocksCollapsedAll(!allCollapsed);
     } else {
-      setCollapsedBlockIds(prev => {
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
+      toggleBlockCollapsed(id);
     }
-  }, [blocks]);
+  }, [blocks, toggleBlockCollapsed, setBlocksCollapsedAll]);
 
   // Feature #2: Section fold helpers
   const getSectionRange = (headingBlockId: string): string[] => {
@@ -1722,62 +1765,88 @@ export default function BlockEditor() {
       )}
 
       <div className="max-w-3xl mx-auto py-6">
-        {blocks.map((block, idx) => {
-          if (hiddenBySection.has(block.id)) return null;
+        {(() => {
+          // Compute blocks hidden by outliner-collapsed parents
+          const hiddenByOutliner = new Set<string>();
+          for (let i = 0; i < blocks.length; i++) {
+            const b = blocks[i];
+            if (b.collapsed) {
+              const parentLevel = b.indentLevel ?? 0;
+              for (let j = i + 1; j < blocks.length; j++) {
+                if ((blocks[j].indentLevel ?? 0) <= parentLevel) break;
+                hiddenByOutliner.add(blocks[j].id);
+              }
+            }
+          }
 
-          const isSectionHeading = getHeadingLevel(block.versions[block.activeVersion]?.html || '') !== null;
-          const sectionFolded = sectionFoldedIds.has(block.id);
+          return blocks.map((block, idx) => {
+            if (hiddenBySection.has(block.id)) return null;
+            if (hiddenByOutliner.has(block.id)) return null;
 
-          return (
-            <div
-              key={block.id}
-              data-block-id={block.id}
-              style={{
-                outline: searchMode && currentMatchBlockId === block.id ? '2px solid #6c8aff' : undefined,
-                outlineOffset: '2px',
-              }}
-            >
-              <BlockItem
-                block={block}
-                blockIndex={idx}
-                isAnimated={animatedBlockId === block.id}
-                isRelated={relatedBlockIds.has(block.id)}
-                isFirst={idx === 0}
-                onFocus={handleFocus}
-                onBlur={handleBlur}
-                onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-                onDragStart={handleDragStart}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-                onDragLeave={handleDragLeave}
-                dropTargetId={dropTargetId}
-                dropPosition={dropPosition}
-                onShowContextMenu={handleShowContextMenu}
-                onSwitchVersion={switchBlockVersion}
-                onDeleteVersion={deleteBlockVersion}
-                onCompare={handleCompare}
-                focusedId={focusedId}
-                citationMap={citationMap}
-                projectCitations={projectCitations}
-                cmdMode={cmdMode}
-                isSelected={selectedBlockIds.has(block.id)}
-                onToggleSelect={handleToggleSelect}
-                draggedId={draggedId}
-                onRemoveCitation={removeCitationFromBlock}
-                collapsed={collapsedBlockIds.has(block.id)}
-                onToggleCollapse={handleToggleCollapse}
-                isSectionHeading={isSectionHeading}
-                sectionFolded={sectionFolded}
-                onToggleSectionFold={() => handleToggleSectionFold(block.id)}
-                focusMode={focusMode}
-                onDeleteComment={deleteBlockComment}
-                onBlockLinkClick={handleBlockLinkClick}
-                onViewTimeline={setTimelineBlockId}
-              />
-            </div>
-          );
-        })}
+            const isSectionHeading = getHeadingLevel(block.versions[block.activeVersion]?.html || '') !== null;
+            const sectionFolded = sectionFoldedIds.has(block.id);
+            const indentLevel = block.indentLevel ?? 0;
+
+            // A block has outliner children if the next visible block after it has a higher indent level
+            const nextBlock = blocks[idx + 1];
+            const hasChildren = nextBlock && (nextBlock.indentLevel ?? 0) > indentLevel && !hiddenBySection.has(nextBlock.id);
+
+            return (
+              <div
+                key={block.id}
+                data-block-id={block.id}
+                style={{
+                  marginLeft: indentLevel * 24,
+                  borderLeft: indentLevel > 0 ? '2px solid #2d3140' : undefined,
+                  paddingLeft: indentLevel > 0 ? 8 : undefined,
+                  outline: searchMode && currentMatchBlockId === block.id ? '2px solid #6c8aff' : undefined,
+                  outlineOffset: '2px',
+                }}
+              >
+                <BlockItem
+                  block={block}
+                  blockIndex={idx}
+                  isAnimated={animatedBlockId === block.id}
+                  isRelated={relatedBlockIds.has(block.id)}
+                  isFirst={idx === 0}
+                  onFocus={handleFocus}
+                  onBlur={handleBlur}
+                  onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
+                  onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                  onDragLeave={handleDragLeave}
+                  dropTargetId={dropTargetId}
+                  dropPosition={dropPosition}
+                  dropIndentLevel={dropIndentLevel}
+                  onShowContextMenu={handleShowContextMenu}
+                  onSwitchVersion={switchBlockVersion}
+                  onDeleteVersion={deleteBlockVersion}
+                  onCompare={handleCompare}
+                  focusedId={focusedId}
+                  citationMap={citationMap}
+                  projectCitations={projectCitations}
+                  cmdMode={cmdMode}
+                  isSelected={selectedBlockIds.has(block.id)}
+                  onToggleSelect={handleToggleSelect}
+                  draggedId={draggedId}
+                  onRemoveCitation={removeCitationFromBlock}
+                  collapsed={block.collapsed ?? false}
+                  onToggleCollapse={handleToggleCollapse}
+                  hasOutlinerChildren={!!hasChildren}
+                  isSectionHeading={isSectionHeading}
+                  sectionFolded={sectionFolded}
+                  onToggleSectionFold={() => handleToggleSectionFold(block.id)}
+                  focusMode={focusMode}
+                  onDeleteComment={deleteBlockComment}
+                  onBlockLinkClick={handleBlockLinkClick}
+                  onViewTimeline={setTimelineBlockId}
+                />
+              </div>
+            );
+          });
+        })()}
 
         {/* Click area to add new block */}
         <div className="h-16 cursor-text" onClick={() => {
@@ -1815,10 +1884,10 @@ export default function BlockEditor() {
           frozen={contextMenuBlock?.frozen ?? false}
           onToggleFrozen={() => { if (contextMenu) { toggleBlockFrozen(contextMenu.blockId); setContextMenu(null); } }}
           onViewTimeline={() => { if (contextMenu) { setTimelineBlockId(contextMenu.blockId); setContextMenu(null); } }}
-          collapsed={contextMenu ? collapsedBlockIds.has(contextMenu.blockId) : false}
+          collapsed={contextMenu ? (blocks.find(b => b.id === contextMenu.blockId)?.collapsed ?? false) : false}
           onToggleCollapse={() => { if (contextMenu) handleToggleCollapse(contextMenu.blockId, false); }}
-          onCollapseAll={() => { setCollapsedBlockIds(new Set(blocks.map(b => b.id))); }}
-          onExpandAll={() => { setCollapsedBlockIds(new Set()); }}
+          onCollapseAll={() => setBlocksCollapsedAll(true)}
+          onExpandAll={() => setBlocksCollapsedAll(false)}
         />
       )}
 

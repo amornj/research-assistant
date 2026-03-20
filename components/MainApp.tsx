@@ -35,12 +35,16 @@ export default function MainApp() {
   const [leftPane, setLeftPane] = useState<PaneState>({ mode: 'editor' });
   const [rightPane, setRightPane] = useState<PaneState>({ mode: 'editor' });
 
+  // Auto-hide panes state (separate from manual collapse)
+  const [panesAutoHidden, setPanesAutoHidden] = useState(false);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingH = useRef(false);
   const isDraggingV = useRef(false);
   const isDraggingSplit = useRef(false);
   const leftPdfInputRef = useRef<HTMLInputElement>(null);
   const rightPdfInputRef = useRef<HTMLInputElement>(null);
+  const autoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadProjects();
@@ -130,6 +134,52 @@ export default function MainApp() {
     window.addEventListener('focus-mode-change', handler);
     return () => window.removeEventListener('focus-mode-change', handler);
   }, []);
+
+  // Auto-hide panes: 10s timer + spacebar restore
+  useEffect(() => {
+    const startTimer = () => {
+      if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
+      autoHideTimerRef.current = setTimeout(() => {
+        setPanesAutoHidden(true);
+      }, 10000);
+    };
+
+    const resetTimer = () => {
+      setPanesAutoHidden(false);
+      startTimer();
+    };
+
+    // Spacebar shows panes if not in a contentEditable
+    const handleSpacebar = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active && (active.isContentEditable || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+      e.preventDefault();
+      setPanesAutoHidden(false);
+      startTimer();
+    };
+
+    startTimer();
+    window.addEventListener('keydown', handleSpacebar);
+
+    return () => {
+      if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
+      window.removeEventListener('keydown', handleSpacebar);
+    };
+  }, []);
+
+  const handlePaneMouseEnter = () => {
+    if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
+    setPanesAutoHidden(false);
+    // Restart timer after mouse leaves (handled in leave)
+  };
+
+  const handlePaneMouseLeave = () => {
+    if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
+    autoHideTimerRef.current = setTimeout(() => {
+      setPanesAutoHidden(true);
+    }, 10000);
+  };
 
   // Command palette actions
   useEffect(() => {
@@ -317,8 +367,10 @@ export default function MainApp() {
       <div ref={containerRef} className="flex flex-1 overflow-hidden">
         {/* Left pane: NLM / Outline toggle */}
         <div
-          style={{ width: leftCollapsed ? 0 : leftWidth, minWidth: leftCollapsed ? 0 : leftWidth }}
-          className="flex flex-col overflow-hidden border-r border-[#2d3140] transition-[width] duration-150"
+          style={{ width: (leftCollapsed || panesAutoHidden) ? 0 : leftWidth, minWidth: (leftCollapsed || panesAutoHidden) ? 0 : leftWidth }}
+          className="flex flex-col overflow-hidden border-r border-[#2d3140] transition-[width] duration-200"
+          onMouseEnter={handlePaneMouseEnter}
+          onMouseLeave={handlePaneMouseLeave}
         >
           {/* Left pane tab switcher (#15) */}
           <div className="flex border-b border-[#2d3140] flex-shrink-0">
@@ -449,7 +501,12 @@ export default function MainApp() {
               {bottomCollapsed ? '∧' : '∨'}
             </button>
           </div>
-          <div style={{ height: bottomCollapsed ? 0 : bottomHeight, minHeight: bottomCollapsed ? 0 : bottomHeight }} className="flex-shrink-0 overflow-hidden border-t border-[#2d3140] transition-[height] duration-150">
+          <div
+            style={{ height: (bottomCollapsed || panesAutoHidden) ? 0 : bottomHeight, minHeight: (bottomCollapsed || panesAutoHidden) ? 0 : bottomHeight }}
+            className="flex-shrink-0 overflow-hidden border-t border-[#2d3140] transition-[height] duration-200"
+            onMouseEnter={handlePaneMouseEnter}
+            onMouseLeave={handlePaneMouseLeave}
+          >
             <BottomPane />
           </div>
         </div>

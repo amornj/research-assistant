@@ -5,13 +5,15 @@ function generateId(): string {
   return Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
 }
 
-function createBlock(html: string = '', type: string = 'paragraph'): Block {
+function createBlock(html: string = '', type: string = 'paragraph', indentLevel: 0 | 1 | 2 = 0): Block {
   return {
     id: generateId(),
     type,
     versions: [{ html, ts: Date.now(), instruction: null }],
     activeVersion: 0,
     citationIds: [],
+    indentLevel,
+    collapsed: false,
   };
 }
 
@@ -44,7 +46,7 @@ interface Store {
   setFocusedBlockId: (id: string | null) => void;
   // Block actions
   setBlocks: (blocks: Block[]) => void;
-  addBlock: (html: string, afterId?: string) => Block;
+  addBlock: (html: string, afterId?: string, indentLevel?: 0 | 1 | 2) => Block;
   updateBlock: (id: string, html: string) => void;
   deleteBlock: (id: string) => void;
   moveBlock: (fromId: string, toId: string, position: 'before' | 'after') => void;
@@ -72,6 +74,11 @@ interface Store {
   updateWritingLog: (date: string, words: number) => void;
   // Feature #17
   toggleBlockFrozen: (blockId: string) => void;
+  // Outliner
+  setBlockIndent: (blockId: string, level: 0 | 1 | 2) => void;
+  toggleBlockCollapsed: (blockId: string) => void;
+  setBlocksCollapsedAll: (collapsed: boolean) => void;
+  moveBlockFamily: (fromId: string, toId: string, position: 'before' | 'after', newIndentLevel?: 0 | 1 | 2) => void;
 }
 
 function saveToStorage(projects: Project[]) {
@@ -102,6 +109,8 @@ export const useStore = create<Store>((set, get) => ({
           blockType: b.blockType || undefined,
           blockComments: b.blockComments || [],
           frozen: b.frozen || false,
+          indentLevel: (b.indentLevel ?? 0) as 0 | 1 | 2,
+          collapsed: b.collapsed ?? false,
         })),
         writingLog: p.writingLog || [],
       }));
@@ -172,18 +181,18 @@ export const useStore = create<Store>((set, get) => ({
     set({ projects: updated, currentProject });
   },
 
-  addBlock: (html = '', afterId) => {
+  addBlock: (html = '', afterId, indentLevel = 0) => {
     const { projects, currentProjectId } = get();
     if (!currentProjectId) {
-      const block = createBlock(html);
+      const block = createBlock(html, 'paragraph', indentLevel);
       return block;
     }
     const project = projects.find(p => p.id === currentProjectId);
     if (!project) {
-      const block = createBlock(html);
+      const block = createBlock(html, 'paragraph', indentLevel);
       return block;
     }
-    const block = createBlock(html);
+    const block = createBlock(html, 'paragraph', indentLevel);
     let blocks: Block[];
     if (afterId) {
       const idx = project.blocks.findIndex(b => b.id === afterId);
@@ -585,6 +594,93 @@ export const useStore = create<Store>((set, get) => ({
     const updated = projects.map(p => {
       if (p.id !== currentProjectId) return p;
       const blocks = p.blocks.map(b => b.id === blockId ? { ...b, frozen: !b.frozen } : b);
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  setBlockIndent: (blockId, level) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.map(b => b.id === blockId ? { ...b, indentLevel: level } : b);
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  toggleBlockCollapsed: (blockId) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.map(b => b.id === blockId ? { ...b, collapsed: !b.collapsed } : b);
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  setBlocksCollapsedAll: (collapsed) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = p.blocks.map(b => ({ ...b, collapsed }));
+      return { ...p, blocks };
+    });
+    const currentProject = updated.find(p => p.id === currentProjectId) || null;
+    saveToStorage(updated);
+    set({ projects: updated, currentProject });
+  },
+
+  moveBlockFamily: (fromId, toId, position, newIndentLevel) => {
+    const { projects, currentProjectId } = get();
+    if (!currentProjectId) return;
+    const updated = projects.map(p => {
+      if (p.id !== currentProjectId) return p;
+      const blocks = [...p.blocks];
+      const fromIdx = blocks.findIndex(b => b.id === fromId);
+      if (fromIdx === -1) return p;
+      const fromLevel = blocks[fromIdx].indentLevel ?? 0;
+
+      // Compute the family: fromBlock + all immediate descendants
+      const familyIndices: number[] = [fromIdx];
+      for (let i = fromIdx + 1; i < blocks.length; i++) {
+        if ((blocks[i].indentLevel ?? 0) <= fromLevel) break;
+        familyIndices.push(i);
+      }
+
+      // Extract family blocks (in order)
+      const family = familyIndices.map(i => blocks[i]);
+
+      // If newIndentLevel is specified, adjust all family blocks by the delta
+      let adjustedFamily = family;
+      if (newIndentLevel !== undefined) {
+        const delta = newIndentLevel - fromLevel;
+        adjustedFamily = family.map((b, i) => ({
+          ...b,
+          indentLevel: i === 0
+            ? newIndentLevel
+            : Math.min(2, Math.max(0, (b.indentLevel ?? 0) + delta)) as 0 | 1 | 2,
+        }));
+      }
+
+      // Remove family from current position (highest indices first)
+      const sortedIndices = [...familyIndices].sort((a, b) => b - a);
+      sortedIndices.forEach(i => blocks.splice(i, 1));
+
+      // Find toId in updated blocks array
+      const toIdx = blocks.findIndex(b => b.id === toId);
+      if (toIdx === -1) return p;
+      const insertIdx = position === 'after' ? toIdx + 1 : toIdx;
+      blocks.splice(insertIdx, 0, ...adjustedFamily);
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
