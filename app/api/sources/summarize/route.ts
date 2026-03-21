@@ -1,3 +1,6 @@
+export const runtime = "nodejs";
+export const maxDuration = 600;
+
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import { spawnSync } from 'child_process';
