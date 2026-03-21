@@ -129,6 +129,20 @@ export default function SourcesTab() {
       return;
     }
 
+    // Confirm creation of new collection/notebook before proceeding
+    const willCreateCollection = newCollectionName.trim() && !collections.some(c => c.name.toLowerCase() === newCollectionName.trim().toLowerCase());
+    const willCreateNotebook = newNotebookName.trim() && !notebooks.some(n => n.name.toLowerCase() === newNotebookName.trim().toLowerCase());
+
+    if (willCreateCollection || willCreateNotebook) {
+      const parts: string[] = [];
+      if (willCreateCollection) parts.push(`• New Zotero collection: "${newCollectionName.trim()}"`);
+      if (willCreateNotebook) parts.push(`• New NotebookLM notebook: "${newNotebookName.trim()}"`);
+      const confirmed = window.confirm(
+        `This will create:\n\n${parts.join('\n')}\n\nContinue?`
+      );
+      if (!confirmed) return;
+    }
+
     const init: ProcessingFile = {
       name: file.name,
       tasks: {
