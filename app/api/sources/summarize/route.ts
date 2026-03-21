@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFileSync, unlinkSync } from 'fs';
-import { execSync } from 'child_process';
+import { writeFileSync, unlinkSync, readFileSync } from 'fs';
 import path from 'path';
 import os from 'os';
 
@@ -46,12 +45,22 @@ ${textSection}
 
 Output ONLY the markdown content, no preamble.`;
 
-    writeFileSync(promptPath, prompt);
-    const result = execSync(
-      `cat "${promptPath}" | claude --print --permission-mode bypassPermissions`,
-      { timeout: 180000, encoding: 'utf8', env: { ...process.env, HOME: '/Users/home' } }
-    );
-    unlinkSync(promptPath);
+    writeFileSync(promptPath, prompt, 'utf8');
+    const CLAUDE_BIN = '/Users/home/.local/bin/claude';
+    
+    // Use spawn for better control over stdin/stdout
+    const { spawnSync } = await import('child_process');
+    const spawnResult = spawnSync(CLAUDE_BIN, ['--print', '--permission-mode', 'bypassPermissions'], {
+      input: readFileSync(promptPath, 'utf8'),
+      timeout: 180000,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: '/Users/home' },
+    });
+    try { unlinkSync(promptPath); } catch {}
+    
+    if (spawnResult.error) throw spawnResult.error;
+    if (spawnResult.status !== 0) throw new Error(spawnResult.stderr || `Claude exited with code ${spawnResult.status}`);
+    const result = spawnResult.stdout;
 
     writeFileSync(outPath, result);
 
