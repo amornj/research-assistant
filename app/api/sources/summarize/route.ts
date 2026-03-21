@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFileSync, unlinkSync, readFileSync } from 'fs';
+import { writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import { spawnSync } from 'child_process';
 import path from 'path';
 import os from 'os';
@@ -26,7 +26,6 @@ export async function POST(req: NextRequest) {
     let filename = '';
 
     if (contentType.includes('multipart/form-data')) {
-      // File upload mode — extract text server-side
       const form = await req.formData();
       const file = form.get('file') as File | null;
       if (!file) return NextResponse.json({ ok: false, error: 'No file provided' }, { status: 400 });
@@ -38,7 +37,7 @@ export async function POST(req: NextRequest) {
       tmpPdf = path.join(os.tmpdir(), `summarize_${Date.now()}.pdf`);
       writeFileSync(tmpPdf, buffer);
 
-      // Extract text using pdftotext (poppler) — fast and reliable
+      // Extract text using pdftotext (poppler)
       const pdftotext = spawnSync('pdftotext', [tmpPdf, '-'], {
         timeout: 30000,
         encoding: 'utf8',
@@ -48,7 +47,6 @@ export async function POST(req: NextRequest) {
         text = pdftotext.stdout;
       }
     } else {
-      // JSON mode (legacy)
       const body = await req.json() as { title: string; text?: string; filename?: string };
       title = body.title;
       text = body.text || '';
@@ -59,6 +57,7 @@ export async function POST(req: NextRequest) {
 
     const slug = toSlug(title) || `source-${Date.now()}`;
     const outPath = path.join(OBSIDIAN_JOURNAL, `${slug}.md`);
+    mkdirSync(path.dirname(outPath), { recursive: true });
 
     const excerpt = text ? text.slice(0, 60000) : '';
 
@@ -76,21 +75,26 @@ Create:
 Filename: ${filename || title}
 ${excerpt ? `\nPDF TEXT:\n${excerpt}` : '\n(No extractable text — summarize based on title/filename only)'}`;
 
+    // Use stdin to pass prompt — avoids ARG_MAX/ENOBUFS issues with large texts
     const result = spawnSync(CLAUDE_BIN, [
       '--permission-mode', 'bypassPermissions',
       '--print',
       '--model', 'sonnet',
-      prompt,
     ], {
+      input: prompt,
       timeout: 600000,
       encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024,
       cwd: os.homedir(),
       env: { ...process.env, HOME: '/Users/home' },
     });
 
-    if (result.error) throw result.error;
+    if (result.error) {
+      throw new Error(`Claude spawn error: ${result.error.message}`);
+    }
     if (result.status !== 0) {
-      throw new Error((result.stderr || result.stdout || '').trim().slice(0, 400) || `Claude exited with code ${result.status}`);
+      const errMsg = (result.stderr || result.stdout || '').trim().slice(0, 400);
+      throw new Error(errMsg || `Claude exited with code ${result.status}`);
     }
 
     const header = `# ${title}\n\n> Source PDF: \`${filename || title}\`\n\n`;
