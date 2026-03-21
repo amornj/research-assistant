@@ -51,6 +51,7 @@ async function extractPdfText(file: File): Promise<string> {
 
 export default function SourcesTab() {
   const [isDragging, setIsDragging] = useState(false);
+  const [dragFileName, setDragFileName] = useState('');
   const [processing, setProcessing] = useState<ProcessingFile | null>(null);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
@@ -73,8 +74,11 @@ export default function SourcesTab() {
       .catch(() => {});
     fetch('/api/notebooks/list')
       .then(r => r.json())
-      .then((d: Array<{ id: string; name: string }>) => {
-        if (Array.isArray(d)) setNotebooks(d);
+      .then((d: Array<Record<string, string>>) => {
+        if (Array.isArray(d)) setNotebooks(d.map(item => ({
+          id: item.id || item.notebook_id || '',
+          name: item.name || item.title || 'Untitled',
+        })));
       })
       .catch(() => {});
   }, []);
@@ -113,7 +117,12 @@ export default function SourcesTab() {
       // Refresh notebook list
       fetch('/api/notebooks/list')
         .then(r => r.json())
-        .then((d: Array<{ id: string; name: string }>) => { if (Array.isArray(d)) setNotebooks(d); })
+        .then((d: Array<Record<string, string>>) => {
+          if (Array.isArray(d)) setNotebooks(d.map(item => ({
+            id: item.id || item.notebook_id || '',
+            name: item.name || item.title || 'Untitled',
+          })));
+        })
         .catch(() => {});
       setSelectedNotebookId(data.notebookId);
       setNewNotebookName('');
@@ -261,12 +270,28 @@ export default function SourcesTab() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+    setDragFileName('');
     const file = e.dataTransfer.files[0];
     if (file) processFile(file);
   }, [processFile]);
 
-  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
-  const handleDragLeave = () => setIsDragging(false);
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    // Try to get filename from drag items
+    if (e.dataTransfer.items?.length > 0) {
+      const item = e.dataTransfer.items[0];
+      if (item.kind === 'file') {
+        const file = item.getAsFile?.();
+        if (file?.name) setDragFileName(file.name);
+      }
+    }
+    // Fallback: check files array (may not be available during dragover in some browsers)
+    if (!dragFileName && e.dataTransfer.files?.length > 0) {
+      setDragFileName(e.dataTransfer.files[0].name);
+    }
+  };
+  const handleDragLeave = () => { setIsDragging(false); setDragFileName(''); };
 
   const taskLabel: Record<keyof ProcessingFile['tasks'], string> = {
     readwise: '📖 Readwise Reader',
@@ -309,8 +334,17 @@ export default function SourcesTab() {
         }`}
       >
         <div className="text-2xl mb-1">📄</div>
-        <div className="font-medium">Drop PDF here</div>
-        <div className="text-xs mt-1">or click to browse</div>
+        {isDragging && dragFileName ? (
+          <>
+            <div className="font-medium truncate max-w-full px-2">{dragFileName}</div>
+            <div className="text-xs mt-1">Release to process</div>
+          </>
+        ) : (
+          <>
+            <div className="font-medium">Drop PDF here</div>
+            <div className="text-xs mt-1">or click to browse</div>
+          </>
+        )}
       </div>
       <input
         ref={fileInputRef}
