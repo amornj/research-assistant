@@ -185,7 +185,10 @@ export default function SourcesTab() {
       ),
 
       (async () => {
-        if (!effectiveCollection) throw new Error('No collection selected');
+        if (!effectiveCollection) {
+          setProcessing(p => p ? { ...p, tasks: { ...p.tasks, zotero: { state: 'done', detail: 'Skipped — no collection selected' } } } : p);
+          return;
+        }
         setProcessing(p => p ? { ...p, tasks: { ...p.tasks, zotero: { state: 'running' } } } : p);
         const res = await fetch('/api/sources/zotero', {
           method: 'POST',
@@ -204,7 +207,10 @@ export default function SourcesTab() {
         if (!nbId && newNotebookName.trim()) {
           nbId = await createAndSelectNotebook();
         }
-        if (!nbId) throw new Error('No notebook selected');
+        if (!nbId) {
+          setProcessing(p => p ? { ...p, tasks: { ...p.tasks, notebooklm: { state: 'done', detail: 'Skipped — no notebook selected' } } } : p);
+          return;
+        }
         setProcessing(p => p ? { ...p, tasks: { ...p.tasks, notebooklm: { state: 'running' } } } : p);
         const form = new FormData();
         form.append('file', file);
@@ -303,7 +309,7 @@ export default function SourcesTab() {
       {/* Collection + Notebook selectors */}
       <div className="flex flex-col gap-2">
         <div>
-          <label className="text-xs text-[#8b90a0] block mb-1">Zotero Collection</label>
+          <label className="text-xs text-[#8b90a0] block mb-1">Zotero Collection <span className="text-[#555a6e]">(optional)</span></label>
           {collections.length > 0 ? (
             <select
               value={selectedCollection}
@@ -323,7 +329,7 @@ export default function SourcesTab() {
           />
         </div>
         <div>
-          <label className="text-xs text-[#8b90a0] block mb-1">NotebookLM Notebook</label>
+          <label className="text-xs text-[#8b90a0] block mb-1">NotebookLM Notebook <span className="text-[#555a6e]">(optional)</span></label>
           {notebooks.length > 0 && (
             <select
               value={selectedNotebookId}
