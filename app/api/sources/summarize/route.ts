@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFileSync, unlinkSync } from 'fs';
+import { writeFileSync, unlinkSync, readFileSync } from 'fs';
 import { spawnSync } from 'child_process';
 import path from 'path';
 import os from 'os';
@@ -17,17 +17,51 @@ function toSlug(title: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  let tmpPdf = '';
   try {
-    const { title, text, filename } = await req.json() as { title: string; text: string; filename?: string };
+    const contentType = req.headers.get('content-type') || '';
+
+    let title = '';
+    let text = '';
+    let filename = '';
+
+    if (contentType.includes('multipart/form-data')) {
+      // File upload mode — extract text server-side
+      const form = await req.formData();
+      const file = form.get('file') as File | null;
+      if (!file) return NextResponse.json({ ok: false, error: 'No file provided' }, { status: 400 });
+
+      filename = file.name;
+      title = filename.replace(/\.pdf$/i, '');
+
+      const buffer = Buffer.from(await file.arrayBuffer());
+      tmpPdf = path.join(os.tmpdir(), `summarize_${Date.now()}.pdf`);
+      writeFileSync(tmpPdf, buffer);
+
+      // Extract text using pdftotext (poppler) — fast and reliable
+      const pdftotext = spawnSync('pdftotext', [tmpPdf, '-'], {
+        timeout: 30000,
+        encoding: 'utf8',
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      if (pdftotext.status === 0 && pdftotext.stdout.trim()) {
+        text = pdftotext.stdout;
+      }
+    } else {
+      // JSON mode (legacy)
+      const body = await req.json() as { title: string; text?: string; filename?: string };
+      title = body.title;
+      text = body.text || '';
+      filename = body.filename || title;
+    }
+
     if (!title) return NextResponse.json({ ok: false, error: 'Missing title' }, { status: 400 });
 
     const slug = toSlug(title) || `source-${Date.now()}`;
     const outPath = path.join(OBSIDIAN_JOURNAL, `${slug}.md`);
 
-    const hasText = text && text.trim().length > 0;
-    const excerpt = hasText ? text.slice(0, 60000) : '';
+    const excerpt = text ? text.slice(0, 60000) : '';
 
-    // Match pdf-up CLI approach: pass prompt as CLI argument to claude
     const prompt = `You are summarizing a PDF for an Obsidian note.
 Return markdown only.
 
@@ -40,9 +74,8 @@ Create:
 - 5 take-home messages
 
 Filename: ${filename || title}
-${hasText ? `\nPDF TEXT:\n${excerpt}` : '\n(No extractable text — summarize based on title/filename only)'}`;
+${excerpt ? `\nPDF TEXT:\n${excerpt}` : '\n(No extractable text — summarize based on title/filename only)'}`;
 
-    // Pass prompt as argument like pdf-up does
     const result = spawnSync(CLAUDE_BIN, [
       '--permission-mode', 'bypassPermissions',
       '--print',
@@ -67,5 +100,7 @@ ${hasText ? `\nPDF TEXT:\n${excerpt}` : '\n(No extractable text — summarize ba
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ ok: false, error: message.slice(0, 300) }, { status: 500 });
+  } finally {
+    if (tmpPdf) try { unlinkSync(tmpPdf); } catch {}
   }
 }

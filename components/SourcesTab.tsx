@@ -40,19 +40,9 @@ function saveHistory(h: HistoryEntry[]) {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(h.slice(0, 50)));
 }
 
-// Extract text from PDF using pdf-parse via the existing extract endpoint
-async function extractPdfText(file: File): Promise<string> {
-  const form = new FormData();
-  form.append('file', file);
-  const res = await fetch('/api/pdf/extract', { method: 'POST', body: form });
-  if (!res.ok) return '';
-  const data = await res.json() as { text?: string; summary?: string };
-  return data.text || data.summary || '';
-}
-
 export default function SourcesTab() {
   const [isDragging, setIsDragging] = useState(false);
-  const [dragFileName, setDragFileName] = useState('');
+  const [stagedFile, setStagedFile] = useState<File | null>(null);
   const [processing, setProcessing] = useState<ProcessingFile | null>(null);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
@@ -66,7 +56,6 @@ export default function SourcesTab() {
 
   useEffect(() => {
     setHistory(loadHistory());
-    // Fetch collections and notebooks in parallel
     fetch('/api/sources/zotero/collections')
       .then(r => r.json())
       .then((d: { ok: boolean; collections?: Collection[] }) => {
@@ -85,23 +74,7 @@ export default function SourcesTab() {
   }, []);
 
   const effectiveCollection = newCollectionName.trim() || selectedCollection;
-
-  const runTask = async <T,>(
-    name: keyof ProcessingFile['tasks'],
-    fn: () => Promise<T>,
-    setProc: React.Dispatch<React.SetStateAction<ProcessingFile | null>>
-  ): Promise<T | null> => {
-    setProc(p => p ? { ...p, tasks: { ...p.tasks, [name]: { state: 'running' } } } : p);
-    try {
-      const result = await fn();
-      setProc(p => p ? { ...p, tasks: { ...p.tasks, [name]: { state: 'done' } } } : p);
-      return result;
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      setProc(p => p ? { ...p, tasks: { ...p.tasks, [name]: { state: 'error', detail } } } : p);
-      return null;
-    }
-  };
+  const isProcessing = processing && Object.values(processing.tasks).some(t => t.state === 'running');
 
   const createAndSelectNotebook = async (): Promise<string> => {
     const name = newNotebookName.trim();
@@ -115,7 +88,6 @@ export default function SourcesTab() {
       });
       const data = await res.json() as { ok: boolean; notebookId?: string; error?: string };
       if (!data.ok || !data.notebookId) throw new Error(data.error || 'Failed to create notebook');
-      // Refresh notebook list
       fetch('/api/notebooks/list')
         .then(r => r.json())
         .then((d: Array<Record<string, string>>) => {
@@ -133,13 +105,22 @@ export default function SourcesTab() {
     }
   };
 
-  const processFile = useCallback(async (file: File) => {
+  // Stage file on drop/select — don't process immediately
+  const stageFile = useCallback((file: File) => {
     if (!file.type.includes('pdf') && !file.name.toLowerCase().endsWith('.pdf')) {
       alert('Please drop a PDF file.');
       return;
     }
+    setStagedFile(file);
+    setProcessing(null);
+  }, []);
 
-    // Confirm creation of new collection/notebook before proceeding
+  // Run the pipeline on staged file
+  const runPipeline = useCallback(async () => {
+    if (!stagedFile) return;
+    const file = stagedFile;
+
+    // Confirm creation of new collection/notebook
     const willCreateCollection = newCollectionName.trim() && !collections.some(c => c.name.toLowerCase() === newCollectionName.trim().toLowerCase());
     const willCreateNotebook = newNotebookName.trim() && !notebooks.some(n => n.name.toLowerCase() === newNotebookName.trim().toLowerCase());
 
@@ -147,10 +128,7 @@ export default function SourcesTab() {
       const parts: string[] = [];
       if (willCreateCollection) parts.push(`• New Zotero collection: "${newCollectionName.trim()}"`);
       if (willCreateNotebook) parts.push(`• New NotebookLM notebook: "${newNotebookName.trim()}"`);
-      const confirmed = window.confirm(
-        `This will create:\n\n${parts.join('\n')}\n\nContinue?`
-      );
-      if (!confirmed) return;
+      if (!window.confirm(`This will create:\n\n${parts.join('\n')}\n\nContinue?`)) return;
     }
 
     const init: ProcessingFile = {
@@ -164,75 +142,64 @@ export default function SourcesTab() {
     };
     setProcessing(init);
 
-    // Extract text first (needed for summarize + zotero)
     const title = file.name.replace(/\.pdf$/i, '');
-    let text = '';
-    try {
-      text = await extractPdfText(file);
-    } catch { /* text stays empty */ }
-
-    // Run all 4 tasks in parallel
-    type TaskResult = {
-      readwise: null;
-      summarize: { path?: string } | null;
-      zotero: null;
-      notebooklm: null;
-    };
-    const results: TaskResult = { readwise: null, summarize: null, zotero: null, notebooklm: null };
+    let summarizePath: string | undefined;
 
     await Promise.allSettled([
+      // 1. Readwise — send file directly
       (async () => {
+        setProcessing(p => p ? { ...p, tasks: { ...p.tasks, readwise: { state: 'running' } } } : p);
         const form = new FormData();
         form.append('file', file);
         const res = await fetch('/api/sources/readwise', { method: 'POST', body: form });
         const data = await res.json() as { ok: boolean; error?: string };
         if (!data.ok) throw new Error(data.error || 'Readwise failed');
-        results.readwise = null;
-      })().then(
-        () => setProcessing(p => p ? { ...p, tasks: { ...p.tasks, readwise: { state: 'done' } } } : p),
-        (err) => setProcessing(p => p ? { ...p, tasks: { ...p.tasks, readwise: { state: 'error', detail: String(err) } } } : p)
+        setProcessing(p => p ? { ...p, tasks: { ...p.tasks, readwise: { state: 'done' } } } : p);
+      })().catch(
+        (err) => setProcessing(p => p ? { ...p, tasks: { ...p.tasks, readwise: { state: 'error', detail: String(err).slice(0, 200) } } } : p)
       ),
 
+      // 2. Summarize — send file directly, backend extracts text with pdftotext
       (async () => {
         setProcessing(p => p ? { ...p, tasks: { ...p.tasks, summarize: { state: 'running' } } } : p);
-        const res = await fetch('/api/sources/summarize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, text, filename: file.name }),
-        });
+        const form = new FormData();
+        form.append('file', file);
+        const res = await fetch('/api/sources/summarize', { method: 'POST', body: form });
         const data = await res.json() as { ok: boolean; path?: string; filename?: string; error?: string };
         if (!data.ok) throw new Error(data.error || 'Summarize failed');
-        results.summarize = { path: data.path };
+        summarizePath = data.path;
         setProcessing(p => p ? { ...p, tasks: { ...p.tasks, summarize: { state: 'done', detail: data.filename } } } : p);
       })().catch(
-        (err) => setProcessing(p => p ? { ...p, tasks: { ...p.tasks, summarize: { state: 'error', detail: String(err) } } } : p)
+        (err) => setProcessing(p => p ? { ...p, tasks: { ...p.tasks, summarize: { state: 'error', detail: String(err).slice(0, 200) } } } : p)
       ),
 
+      // 3. Zotero — just needs title + collection
       (async () => {
         if (!effectiveCollection) {
-          setProcessing(p => p ? { ...p, tasks: { ...p.tasks, zotero: { state: 'done', detail: 'Skipped — no collection selected' } } } : p);
+          setProcessing(p => p ? { ...p, tasks: { ...p.tasks, zotero: { state: 'done', detail: 'Skipped — no collection' } } } : p);
           return;
         }
         setProcessing(p => p ? { ...p, tasks: { ...p.tasks, zotero: { state: 'running' } } } : p);
         const res = await fetch('/api/sources/zotero', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, text: text.slice(0, 500), collection: effectiveCollection }),
+          body: JSON.stringify({ title, text: '', collection: effectiveCollection }),
         });
         const data = await res.json() as { ok: boolean; itemKey?: string; error?: string };
         if (!data.ok) throw new Error(data.error || 'Zotero failed');
-        setProcessing(p => p ? { ...p, tasks: { ...p.tasks, zotero: { state: 'done', detail: data.itemKey } } } : p);
+        setProcessing(p => p ? { ...p, tasks: { ...p.tasks, zotero: { state: 'done', detail: `Item: ${data.itemKey}` } } } : p);
       })().catch(
-        (err) => setProcessing(p => p ? { ...p, tasks: { ...p.tasks, zotero: { state: 'error', detail: String(err) } } } : p)
+        (err) => setProcessing(p => p ? { ...p, tasks: { ...p.tasks, zotero: { state: 'error', detail: String(err).slice(0, 200) } } } : p)
       ),
 
+      // 4. NotebookLM — send file directly
       (async () => {
         let nbId = selectedNotebookId;
         if (!nbId && newNotebookName.trim()) {
           nbId = await createAndSelectNotebook();
         }
         if (!nbId) {
-          setProcessing(p => p ? { ...p, tasks: { ...p.tasks, notebooklm: { state: 'done', detail: 'Skipped — no notebook selected' } } } : p);
+          setProcessing(p => p ? { ...p, tasks: { ...p.tasks, notebooklm: { state: 'done', detail: 'Skipped — no notebook' } } } : p);
           return;
         }
         setProcessing(p => p ? { ...p, tasks: { ...p.tasks, notebooklm: { state: 'running' } } } : p);
@@ -242,9 +209,9 @@ export default function SourcesTab() {
         const res = await fetch('/api/sources/notebooklm', { method: 'POST', body: form });
         const data = await res.json() as { ok: boolean; details?: string; error?: string };
         if (!data.ok) throw new Error(data.error || 'NotebookLM failed');
-        setProcessing(p => p ? { ...p, tasks: { ...p.tasks, notebooklm: { state: 'done', detail: data.details } } } : p);
+        setProcessing(p => p ? { ...p, tasks: { ...p.tasks, notebooklm: { state: 'done', detail: data.details?.slice(0, 100) } } } : p);
       })().catch(
-        (err) => setProcessing(p => p ? { ...p, tasks: { ...p.tasks, notebooklm: { state: 'error', detail: String(err) } } } : p)
+        (err) => setProcessing(p => p ? { ...p, tasks: { ...p.tasks, notebooklm: { state: 'error', detail: String(err).slice(0, 200) } } } : p)
       ),
     ]);
 
@@ -259,57 +226,31 @@ export default function SourcesTab() {
           zotero: current?.tasks.zotero.state === 'done',
           notebooklm: current?.tasks.notebooklm.state === 'done',
         },
-        obsidianPath: results.summarize?.path,
+        obsidianPath: summarizePath,
       };
       const h = [entry, ...loadHistory()];
       saveHistory(h);
       setHistory(h);
 
-      // Play glass sound if at least one task succeeded
       const anySuccess = Object.values(entry.results).some(Boolean);
       if (anySuccess) playCompletionSound();
 
       return current;
     });
-  }, [effectiveCollection, selectedNotebookId, newNotebookName]);
+  }, [stagedFile, effectiveCollection, selectedNotebookId, newNotebookName, collections, notebooks]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file) {
-      setDragFileName(file.name);
-      processFile(file);
-      // Clear drag name after a short delay (processing state takes over)
-      setTimeout(() => setDragFileName(''), 500);
-    } else {
-      setDragFileName('');
-    }
-  }, [processFile]);
+    if (file) stageFile(file);
+  }, [stageFile]);
 
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-    // Try to get filename — works reliably on dragenter in most browsers
-    if (e.dataTransfer.files?.length > 0) {
-      setDragFileName(e.dataTransfer.files[0].name);
-    } else if (e.dataTransfer.items?.length > 0) {
-      const item = e.dataTransfer.items[0];
-      if (item.kind === 'file') {
-        // type gives us the MIME, not the name — but we can show it's a PDF
-        setDragFileName(item.type === 'application/pdf' ? 'PDF file' : 'File');
-      }
-    }
-  };
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
+  const handleDragEnter = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
   const handleDragLeave = (e: React.DragEvent) => {
-    // Only trigger if leaving the drop zone itself (not a child element)
     if (e.currentTarget.contains(e.relatedTarget as Node)) return;
     setIsDragging(false);
-    setDragFileName('');
   };
 
   const taskLabel: Record<keyof ProcessingFile['tasks'], string> = {
@@ -332,7 +273,7 @@ export default function SourcesTab() {
           {taskLabel[name]}
         </span>
         {status.detail && (
-          <div className="text-[#8b90a0] truncate mt-0.5">{status.detail}</div>
+          <div className="text-[10px] text-[#8b90a0] truncate mt-0.5">{status.detail}</div>
         )}
       </div>
     </div>
@@ -346,23 +287,33 @@ export default function SourcesTab() {
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        onClick={() => fileInputRef.current?.click()}
-        className={`rounded-lg border-2 border-dashed p-6 text-center cursor-pointer transition-colors ${
+        onClick={() => !stagedFile && fileInputRef.current?.click()}
+        className={`rounded-lg border-2 border-dashed p-4 text-center transition-colors ${
           isDragging
             ? 'border-[#6c8aff] bg-[#6c8aff]/10 text-[#6c8aff]'
-            : 'border-[#2d3140] text-[#8b90a0] hover:border-[#6c8aff] hover:text-[#6c8aff]'
+            : stagedFile
+            ? 'border-[#6c8aff]/50 bg-[#6c8aff]/5 text-[#e1e4ed]'
+            : 'border-[#2d3140] text-[#8b90a0] hover:border-[#6c8aff] hover:text-[#6c8aff] cursor-pointer'
         }`}
       >
-        <div className="text-2xl mb-1">📄</div>
-        {isDragging && dragFileName ? (
-          <>
-            <div className="font-medium truncate max-w-full px-2">{dragFileName}</div>
-            <div className="text-xs mt-1">Release to process</div>
-          </>
+        {stagedFile ? (
+          <div className="flex items-center gap-2">
+            <span className="text-lg">📄</span>
+            <div className="flex-1 text-left min-w-0">
+              <div className="font-medium text-xs truncate">{stagedFile.name}</div>
+              <div className="text-[10px] text-[#8b90a0]">{(stagedFile.size / 1024).toFixed(0)} KB</div>
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); setStagedFile(null); setProcessing(null); }}
+              className="text-[#8b90a0] hover:text-red-400 text-xs px-1"
+              title="Remove"
+            >✕</button>
+          </div>
         ) : (
           <>
-            <div className="font-medium">Drop PDF here</div>
-            <div className="text-xs mt-1">or click to browse</div>
+            <div className="text-xl mb-0.5">📄</div>
+            <div className="font-medium text-xs">Drop PDF here</div>
+            <div className="text-[10px] mt-0.5">or click to browse</div>
           </>
         )}
       </div>
@@ -371,59 +322,72 @@ export default function SourcesTab() {
         type="file"
         accept=".pdf,application/pdf"
         className="hidden"
-        onChange={e => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ''; }}
+        onChange={e => { const f = e.target.files?.[0]; if (f) stageFile(f); e.target.value = ''; }}
       />
 
-      {/* Collection + Notebook selectors */}
-      <div className="flex flex-col gap-2">
-        <div>
-          <label className="text-xs text-[#8b90a0] block mb-1">Zotero Collection <span className="text-[#555a6e]">(optional)</span></label>
-          {collections.length > 0 ? (
-            <select
-              value={selectedCollection}
-              onChange={e => { setSelectedCollection(e.target.value); setNewCollectionName(''); }}
-              className="w-full bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] focus:outline-none focus:border-[#6c8aff]"
-            >
-              <option value="">— Select or type new —</option>
-              {collections.map(c => <option key={c.key} value={c.name}>{c.name}</option>)}
-            </select>
-          ) : null}
-          <input
-            type="text"
-            placeholder={collections.length > 0 ? 'Or type new collection name…' : 'Collection name…'}
-            value={newCollectionName}
-            onChange={e => { setNewCollectionName(e.target.value); setSelectedCollection(''); }}
-            className="w-full mt-1 bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] placeholder-[#8b90a0] focus:outline-none focus:border-[#6c8aff]"
-          />
-        </div>
-        <div>
-          <label className="text-xs text-[#8b90a0] block mb-1">NotebookLM Notebook <span className="text-[#555a6e]">(optional)</span></label>
-          {notebooks.length > 0 && (
-            <select
-              value={selectedNotebookId}
-              onChange={e => { setSelectedNotebookId(e.target.value); setNewNotebookName(''); }}
-              className="w-full bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] focus:outline-none focus:border-[#6c8aff]"
-            >
-              <option value="">— Select existing —</option>
-              {notebooks.map(n => <option key={n.id} value={n.id}>{n.name}</option>)}
-            </select>
-          )}
-          <input
-            type="text"
-            placeholder={notebooks.length > 0 ? 'Or type name to create new…' : 'Notebook name to create…'}
-            value={newNotebookName}
-            onChange={e => { setNewNotebookName(e.target.value); setSelectedNotebookId(''); }}
-            className="w-full mt-1 bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] placeholder-[#8b90a0] focus:outline-none focus:border-[#6c8aff]"
-          />
-          {creatingNotebook && <div className="text-[10px] text-[#8b90a0] mt-0.5">Creating notebook...</div>}
-        </div>
+      {/* Collection selector */}
+      <div>
+        <label className="text-[10px] text-[#8b90a0] block mb-1">Zotero Collection <span className="text-[#555a6e]">(optional)</span></label>
+        {collections.length > 0 && (
+          <select
+            value={selectedCollection}
+            onChange={e => { setSelectedCollection(e.target.value); setNewCollectionName(''); }}
+            className="w-full bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] focus:outline-none focus:border-[#6c8aff]"
+          >
+            <option value="">— Select or type new —</option>
+            {collections.map(c => <option key={c.key} value={c.name}>{c.name}</option>)}
+          </select>
+        )}
+        <input
+          type="text"
+          placeholder="Or type new collection name…"
+          value={newCollectionName}
+          onChange={e => { setNewCollectionName(e.target.value); setSelectedCollection(''); }}
+          className="w-full mt-1 bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] placeholder-[#8b90a0] focus:outline-none focus:border-[#6c8aff]"
+        />
       </div>
+
+      {/* Notebook selector */}
+      <div>
+        <label className="text-[10px] text-[#8b90a0] block mb-1">NotebookLM Notebook <span className="text-[#555a6e]">(optional)</span></label>
+        {notebooks.length > 0 && (
+          <select
+            value={selectedNotebookId}
+            onChange={e => { setSelectedNotebookId(e.target.value); setNewNotebookName(''); }}
+            className="w-full bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] focus:outline-none focus:border-[#6c8aff]"
+          >
+            <option value="">— Select existing —</option>
+            {notebooks.map(n => <option key={n.id} value={n.id}>{n.name}</option>)}
+          </select>
+        )}
+        <input
+          type="text"
+          placeholder="Or type name to create new…"
+          value={newNotebookName}
+          onChange={e => { setNewNotebookName(e.target.value); setSelectedNotebookId(''); }}
+          className="w-full mt-1 bg-[#232733] border border-[#2d3140] rounded px-2 py-1 text-xs text-[#e1e4ed] placeholder-[#8b90a0] focus:outline-none focus:border-[#6c8aff]"
+        />
+        {creatingNotebook && <div className="text-[10px] text-[#8b90a0] mt-0.5">Creating notebook...</div>}
+      </div>
+
+      {/* Run button */}
+      <button
+        onClick={runPipeline}
+        disabled={!stagedFile || !!isProcessing}
+        className={`w-full py-2.5 rounded-lg font-medium text-sm transition-all ${
+          stagedFile && !isProcessing
+            ? 'bg-[#6c8aff] hover:bg-[#5a78f0] text-white cursor-pointer'
+            : 'bg-[#232733] text-[#555a6e] cursor-not-allowed'
+        }`}
+      >
+        {isProcessing ? '⟳ Processing…' : stagedFile ? `▶ Process "${stagedFile.name.slice(0, 30)}"` : 'Drop a PDF to start'}
+      </button>
 
       {/* Processing status */}
       {processing && (
         <div className="rounded-lg bg-[#1a1d27] border border-[#2d3140] p-3">
           <div className="text-xs font-medium text-[#e1e4ed] mb-2 truncate">
-            Processing: {processing.name}
+            {processing.name}
           </div>
           {(Object.keys(processing.tasks) as Array<keyof ProcessingFile['tasks']>).map(name => (
             <TaskRow key={name} name={name} status={processing.tasks[name]} />
@@ -434,7 +398,7 @@ export default function SourcesTab() {
       {/* History */}
       {history.length > 0 && (
         <div>
-          <div className="text-xs text-[#8b90a0] font-medium mb-2 flex items-center justify-between">
+          <div className="text-[10px] text-[#8b90a0] font-medium mb-1.5 flex items-center justify-between">
             <span>Recent</span>
             <button
               onClick={() => { saveHistory([]); setHistory([]); }}
@@ -443,15 +407,12 @@ export default function SourcesTab() {
               Clear
             </button>
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1">
             {history.map((entry, i) => (
-              <div key={i} className="rounded bg-[#1a1d27] border border-[#2d3140] px-2.5 py-2">
-                <div className="text-xs font-medium truncate text-[#e1e4ed]">{entry.filename}</div>
-                <div className="text-[10px] text-[#8b90a0] mt-0.5">
-                  {new Date(entry.date).toLocaleString()}
-                </div>
-                <div className="flex gap-2 mt-1.5 text-[10px]">
-                  <span className={entry.results.readwise ? 'text-green-400' : 'text-red-400'}>Readwise</span>
+              <div key={i} className="rounded bg-[#1a1d27] border border-[#2d3140] px-2.5 py-1.5">
+                <div className="text-[11px] font-medium truncate text-[#e1e4ed]">{entry.filename}</div>
+                <div className="flex gap-2 mt-1 text-[10px]">
+                  <span className={entry.results.readwise ? 'text-green-400' : 'text-red-400'}>Reader</span>
                   <span className={entry.results.summarize ? 'text-green-400' : 'text-red-400'}>Obsidian</span>
                   <span className={entry.results.zotero ? 'text-green-400' : 'text-red-400'}>Zotero</span>
                   <span className={entry.results.notebooklm ? 'text-green-400' : 'text-red-400'}>NLM</span>
