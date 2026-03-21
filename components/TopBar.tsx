@@ -74,6 +74,8 @@ export default function TopBar({ onNewProject, theme, onThemeChange }: TopBarPro
   const [showHamburger, setShowHamburger] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
+  const [showProjectDropdown, setShowProjectDropdown] = useState(false);
+  const projectDropdownRef = useRef<HTMLDivElement>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Compute total words from current project blocks
@@ -97,6 +99,17 @@ export default function TopBar({ onNewProject, theme, onThemeChange }: TopBarPro
   const progressPct = wordCountGoal ? Math.min(100, (displayWords / wordCountGoal) * 100) : null;
   const readingMins = Math.ceil(displayWords / 200);
 
+  // Close project dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (projectDropdownRef.current && !projectDropdownRef.current.contains(e.target as Node)) {
+        setShowProjectDropdown(false);
+      }
+    };
+    if (showProjectDropdown) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showProjectDropdown]);
+
   // Listen for command palette export events
   useEffect(() => {
     const handler = (e: Event) => {
@@ -115,10 +128,11 @@ export default function TopBar({ onNewProject, theme, onThemeChange }: TopBarPro
     let md = `# ${currentProject.name}\n\n`;
     for (const block of currentProject.blocks) {
       const html = block.versions[block.activeVersion]?.html || '';
-      const text = htmlToText(html);
+      const text = htmlToText(html).trim();
+      if (!text) continue;
       const cids = block.citationIds || [];
       const nums = cids.map(id => citationMap.get(id)).filter((n): n is number => n !== undefined);
-      if (nums.length > 0) md += text.trimEnd() + ` [${nums.join(',')}]\n\n`;
+      if (nums.length > 0) md += text + ` [${nums.join(',')}]\n\n`;
       else md += text + '\n\n';
     }
     const allCited = [...citationMap.entries()].sort((a, b) => a[1] - b[1]);
@@ -144,14 +158,13 @@ export default function TopBar({ onNewProject, theme, onThemeChange }: TopBarPro
     let body = '';
     for (const block of currentProject.blocks) {
       const blockHtml = block.versions[block.activeVersion]?.html || '';
+      if (!blockHtml.trim()) continue;
       const cids = block.citationIds || [];
       const nums = cids.map(id => citationMap.get(id)).filter((n): n is number => n !== undefined);
-      if (nums.length > 0) {
-        const badges = nums.map(n => `<sup style="background:#6c8aff22;color:#6c8aff;padding:0 3px;border-radius:3px;font-size:10px">[${n}]</sup>`).join('');
-        body += blockHtml + badges;
-      } else {
-        body += blockHtml;
-      }
+      const badges = nums.length > 0
+        ? nums.map(n => `<sup style="background:#6c8aff22;color:#6c8aff;padding:0 3px;border-radius:3px;font-size:10px">[${n}]</sup>`).join('')
+        : '';
+      body += `<div style="margin-bottom:0.8em">${blockHtml}${badges}</div>\n`;
     }
     const allCited = [...citationMap.entries()].sort((a, b) => a[1] - b[1]);
     if (allCited.length > 0) {
@@ -378,38 +391,58 @@ ${body}
     <div className="flex flex-col flex-shrink-0">
       <div className="flex items-center gap-2 px-3 py-2 bg-[#1a1d27] border-b border-[#2d3140] h-10">
         <span className="text-[#6c8aff] font-semibold text-sm mr-2 hidden sm:inline">RA</span>
-        <select
-          value={currentProjectId || ''}
-          onChange={e => selectProject(e.target.value)}
-          className="bg-[#232733] border border-[#2d3140] text-[#e1e4ed] text-sm rounded px-2 py-1 focus:outline-none focus:border-[#6c8aff] max-w-[110px]"
-        >
-          {projects.length === 0 && <option value="">No projects</option>}
-          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        {/* Editable project name */}
-        {currentProject && (
-          editingName ? (
-            <input
-              autoFocus
-              value={nameInput}
-              onChange={e => setNameInput(e.target.value)}
-              onBlur={saveNameEdit}
-              onKeyDown={e => { if (e.key === 'Enter') saveNameEdit(); if (e.key === 'Escape') cancelNameEdit(); }}
-              className="flex-1 max-w-[200px] bg-[#232733] border border-[#6c8aff] text-[#e1e4ed] text-sm rounded px-2 py-1 focus:outline-none"
-            />
-          ) : (
-            <span
-              className="flex-1 max-w-[200px] text-sm text-[#e1e4ed] truncate cursor-pointer px-1 py-1 rounded hover:bg-[#232733] select-none"
-              title="Double-click to rename"
-              onDoubleClick={startNameEdit}
-              onTouchStart={() => { longPressTimer.current = setTimeout(startNameEdit, 500); }}
-              onTouchEnd={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
-              onTouchMove={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+        {/* Merged project selector + editable name */}
+        <div className="relative flex items-center gap-0" ref={projectDropdownRef}>
+          {currentProject && (
+            editingName ? (
+              <input
+                autoFocus
+                value={nameInput}
+                onChange={e => setNameInput(e.target.value)}
+                onBlur={saveNameEdit}
+                onKeyDown={e => { if (e.key === 'Enter') saveNameEdit(); if (e.key === 'Escape') cancelNameEdit(); }}
+                className="max-w-[200px] bg-[#232733] border border-[#6c8aff] text-[#e1e4ed] text-sm rounded px-2 py-1 focus:outline-none"
+              />
+            ) : (
+              <span
+                className="text-sm text-[#e1e4ed] truncate cursor-text px-1 py-1 rounded hover:bg-[#232733]/60 max-w-[200px]"
+                title="Click to rename"
+                onClick={startNameEdit}
+                onTouchStart={() => { longPressTimer.current = setTimeout(startNameEdit, 500); }}
+                onTouchEnd={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                onTouchMove={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+              >
+                {currentProject.name}
+              </span>
+            )
+          )}
+          {projects.length > 1 && (
+            <button
+              onClick={() => setShowProjectDropdown(v => !v)}
+              className="px-1 py-1 text-[#8b90a0] hover:text-[#e1e4ed] transition-colors text-xs"
+              title="Switch project"
             >
-              {currentProject.name}
-            </span>
-          )
-        )}
+              ▾
+            </button>
+          )}
+          {showProjectDropdown && (
+            <div className="absolute left-0 top-full mt-1 bg-[#1a1d27] border border-[#2d3140] rounded shadow-xl z-50 min-w-[180px] py-1 max-h-[300px] overflow-y-auto">
+              {projects.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => { selectProject(p.id); setShowProjectDropdown(false); }}
+                  className={`w-full text-left px-3 py-1.5 text-sm transition-colors truncate ${
+                    p.id === currentProjectId
+                      ? 'text-[#6c8aff] bg-[#6c8aff]/10'
+                      : 'text-[#c8ccd8] hover:bg-[#2d3140] hover:text-[#e1e4ed]'
+                  }`}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <button onClick={onNewProject} className="px-3 py-1 bg-[#6c8aff] hover:bg-[#5a78f0] text-white text-sm rounded transition-colors flex-shrink-0">
           + New
         </button>

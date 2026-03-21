@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { playCompletionSound } from '@/lib/sounds';
 
 interface Collection { key: string; name: string; }
 interface Notebook { id: string; name: string; }
@@ -247,7 +248,7 @@ export default function SourcesTab() {
       ),
     ]);
 
-    // Save to history
+    // Save to history + play sound
     setProcessing(current => {
       const entry: HistoryEntry = {
         filename: file.name,
@@ -263,6 +264,11 @@ export default function SourcesTab() {
       const h = [entry, ...loadHistory()];
       saveHistory(h);
       setHistory(h);
+
+      // Play glass sound if at least one task succeeded
+      const anySuccess = Object.values(entry.results).some(Boolean);
+      if (anySuccess) playCompletionSound();
+
       return current;
     });
   }, [effectiveCollection, selectedNotebookId, newNotebookName]);
@@ -270,28 +276,41 @@ export default function SourcesTab() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    setDragFileName('');
     const file = e.dataTransfer.files[0];
-    if (file) processFile(file);
+    if (file) {
+      setDragFileName(file.name);
+      processFile(file);
+      // Clear drag name after a short delay (processing state takes over)
+      setTimeout(() => setDragFileName(''), 500);
+    } else {
+      setDragFileName('');
+    }
   }, [processFile]);
 
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    // Try to get filename — works reliably on dragenter in most browsers
+    if (e.dataTransfer.files?.length > 0) {
+      setDragFileName(e.dataTransfer.files[0].name);
+    } else if (e.dataTransfer.items?.length > 0) {
+      const item = e.dataTransfer.items[0];
+      if (item.kind === 'file') {
+        // type gives us the MIME, not the name — but we can show it's a PDF
+        setDragFileName(item.type === 'application/pdf' ? 'PDF file' : 'File');
+      }
+    }
+  };
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
-    // Try to get filename from drag items
-    if (e.dataTransfer.items?.length > 0) {
-      const item = e.dataTransfer.items[0];
-      if (item.kind === 'file') {
-        const file = item.getAsFile?.();
-        if (file?.name) setDragFileName(file.name);
-      }
-    }
-    // Fallback: check files array (may not be available during dragover in some browsers)
-    if (!dragFileName && e.dataTransfer.files?.length > 0) {
-      setDragFileName(e.dataTransfer.files[0].name);
-    }
   };
-  const handleDragLeave = () => { setIsDragging(false); setDragFileName(''); };
+  const handleDragLeave = (e: React.DragEvent) => {
+    // Only trigger if leaving the drop zone itself (not a child element)
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setIsDragging(false);
+    setDragFileName('');
+  };
 
   const taskLabel: Record<keyof ProcessingFile['tasks'], string> = {
     readwise: '📖 Readwise Reader',
@@ -324,6 +343,7 @@ export default function SourcesTab() {
       {/* Drop zone */}
       <div
         onDrop={handleDrop}
+        onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onClick={() => fileInputRef.current?.click()}

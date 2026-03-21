@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFileSync, unlinkSync, readFileSync } from 'fs';
+import { writeFileSync, unlinkSync } from 'fs';
+import { spawnSync } from 'child_process';
 import path from 'path';
 import os from 'os';
 
 const OBSIDIAN_JOURNAL = '/Users/home/projects/obsidian/journal';
+const CLAUDE_BIN = '/Users/home/.local/bin/claude';
 
 function toSlug(title: string): string {
   return title
@@ -15,8 +17,6 @@ function toSlug(title: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  const promptPath = path.join(os.tmpdir(), `summarize_prompt_${Date.now()}.txt`);
-
   try {
     const { title, text, filename } = await req.json() as { title: string; text: string; filename?: string };
     if (!title) return NextResponse.json({ ok: false, error: 'Missing title' }, { status: 400 });
@@ -25,49 +25,47 @@ export async function POST(req: NextRequest) {
     const outPath = path.join(OBSIDIAN_JOURNAL, `${slug}.md`);
 
     const hasText = text && text.trim().length > 0;
-    const textSection = hasText
-      ? `Full text (may be truncated):\n${text.slice(0, 30000)}`
-      : `(No extractable text — summarize based on title/filename only)`;
+    const excerpt = hasText ? text.slice(0, 60000) : '';
 
-    const prompt = `You are a research assistant. Summarize the following PDF document into a well-structured Obsidian markdown note.
+    // Match pdf-up CLI approach: pass prompt as CLI argument to claude
+    const prompt = `You are summarizing a PDF for an Obsidian note.
+Return markdown only.
 
-Include:
-- A YAML frontmatter block with title, date (today), and tags
-- ## Summary section (3-5 sentences, or best effort if no text available)
-- ## Key Points section (bullet list)
-- ## Notable Quotes section (2-4 direct quotes if available, otherwise omit)
-- ## Research Relevance section (how this might be useful for research)
+Create:
+- Title
+- Citation (if inferable; otherwise use filename)
+- Summary (3-5 paragraphs)
+- Key points (bullets)
+- Clinical / practical implications (bullets)
+- 5 take-home messages
 
-PDF Title: ${title}
-${filename ? `Filename: ${filename}` : ''}
+Filename: ${filename || title}
+${hasText ? `\nPDF TEXT:\n${excerpt}` : '\n(No extractable text — summarize based on title/filename only)'}`;
 
-${textSection}
-
-Output ONLY the markdown content, no preamble.`;
-
-    writeFileSync(promptPath, prompt, 'utf8');
-    const CLAUDE_BIN = '/Users/home/.local/bin/claude';
-    
-    // Use spawn for better control over stdin/stdout
-    const { spawnSync } = await import('child_process');
-    const spawnResult = spawnSync(CLAUDE_BIN, ['--print', '--permission-mode', 'bypassPermissions'], {
-      input: readFileSync(promptPath, 'utf8'),
-      timeout: 180000,
+    // Pass prompt as argument like pdf-up does
+    const result = spawnSync(CLAUDE_BIN, [
+      '--permission-mode', 'bypassPermissions',
+      '--print',
+      '--model', 'sonnet',
+      prompt,
+    ], {
+      timeout: 600000,
       encoding: 'utf8',
+      cwd: os.homedir(),
       env: { ...process.env, HOME: '/Users/home' },
     });
-    try { unlinkSync(promptPath); } catch {}
-    
-    if (spawnResult.error) throw spawnResult.error;
-    if (spawnResult.status !== 0) throw new Error(spawnResult.stderr || `Claude exited with code ${spawnResult.status}`);
-    const result = spawnResult.stdout;
 
-    writeFileSync(outPath, result);
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error((result.stderr || result.stdout || '').trim().slice(0, 400) || `Claude exited with code ${result.status}`);
+    }
+
+    const header = `# ${title}\n\n> Source PDF: \`${filename || title}\`\n\n`;
+    writeFileSync(outPath, header + result.stdout.trim() + '\n');
 
     return NextResponse.json({ ok: true, path: outPath, filename: `${slug}.md` });
   } catch (err: unknown) {
-    try { unlinkSync(promptPath); } catch { /* ignore */ }
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: message.slice(0, 300) }, { status: 500 });
   }
 }
