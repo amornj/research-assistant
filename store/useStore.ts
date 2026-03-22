@@ -17,8 +17,118 @@ function createBlock(html: string = '', type: string = 'paragraph', indentLevel:
   };
 }
 
-const STORAGE_KEY = 'research_assistant_projects';
+// ---------------------------------------------------------------------------
+// API helpers
+// ---------------------------------------------------------------------------
+const API_BASE = (process.env.NEXT_PUBLIC_SYNC_API_URL || '').trim();
 
+function authHeaders(): Record<string, string> {
+  const key = process.env.NEXT_PUBLIC_PROJECTS_API_KEY;
+  return key ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` } : { 'Content-Type': 'application/json' };
+}
+
+async function apiGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+async function apiPut(path: string, data: any): Promise<void> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`API PUT error: ${res.status}`);
+}
+
+async function apiDelete(path: string): Promise<void> {
+  const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE', headers: authHeaders() });
+  if (!res.ok) throw new Error(`API DELETE error: ${res.status}`);
+}
+
+// ---------------------------------------------------------------------------
+// Sync Engine (iCloud-inspired)
+//
+// Principles:
+// 1. Local edits are NEVER overwritten by server fetches
+// 2. Every local mutation marks the project "dirty" with a local version counter
+// 3. Saves are debounced but MUST complete before any server refresh can apply
+// 4. On tab focus / selectProject, we only apply server data if local is clean
+// 5. If save fails, status goes to "error" and retries on next mutation
+// ---------------------------------------------------------------------------
+export type SyncStatus = 'synced' | 'pending' | 'saving' | 'error';
+
+// Per-project dirty tracking
+const dirtyProjects = new Map<string, number>(); // projectId → dirty counter
+let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+let saveInFlight = false;
+let _getState: (() => Store) | null = null;
+let _setState: ((partial: Partial<Store>) => void) | null = null;
+
+function markDirty(projectId: string) {
+  dirtyProjects.set(projectId, (dirtyProjects.get(projectId) || 0) + 1);
+}
+
+function isDirty(projectId: string): boolean {
+  return (dirtyProjects.get(projectId) || 0) > 0;
+}
+
+function markClean(projectId: string) {
+  dirtyProjects.delete(projectId);
+}
+
+async function flushSave(): Promise<void> {
+  if (!_getState || !_setState) return;
+  if (saveTimeout) { clearTimeout(saveTimeout); saveTimeout = null; }
+  
+  const { currentProject, currentProjectId } = _getState();
+  if (!currentProject || !currentProjectId) return;
+  if (!isDirty(currentProjectId)) {
+    _setState({ syncStatus: 'synced' });
+    return;
+  }
+
+  saveInFlight = true;
+  _setState({ syncStatus: 'saving' });
+  
+  try {
+    const toSave = { ...currentProject, lastModified: new Date().toISOString() };
+    await apiPut(`/api/projects/${currentProjectId}`, toSave);
+    markClean(currentProjectId);
+    saveInFlight = false;
+    // Check if more edits happened during save
+    if (isDirty(currentProjectId)) {
+      _setState({ syncStatus: 'pending' });
+      scheduleSave();
+    } else {
+      _setState({ syncStatus: 'synced' });
+    }
+  } catch (err) {
+    console.error('Failed to save project:', err);
+    saveInFlight = false;
+    _setState({ syncStatus: 'error' });
+  }
+}
+
+function scheduleSave() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  if (saveInFlight) return; // will re-schedule after current save completes
+  saveTimeout = setTimeout(() => {
+    saveTimeout = null;
+    flushSave();
+  }, 500);
+}
+
+function onMutation(project: Project) {
+  markDirty(project.id);
+  _setState?.({ syncStatus: 'pending' });
+  scheduleSave();
+}
+
+// ---------------------------------------------------------------------------
+// Export helpers
+// ---------------------------------------------------------------------------
 export function getOrderedCitationMap(blocks: Block[], citations: Citation[]): Map<string, number> {
   const map = new Map<string, number>();
   let counter = 1;
@@ -32,15 +142,23 @@ export function getOrderedCitationMap(blocks: Block[], citations: Citation[]): M
   return map;
 }
 
+// ---------------------------------------------------------------------------
+// Store interface
+// ---------------------------------------------------------------------------
 interface Store {
   projects: Project[];
   currentProjectId: string | null;
   currentProject: Project | null;
   focusedBlockId: string | null;
+  projectsLoaded: boolean;
+  syncStatus: SyncStatus;
   // Actions
-  loadProjects: () => void;
+  loadProjects: () => Promise<void>;
   createProject: (data: Partial<Project>) => Project;
+  deleteProject: (id: string) => void;
   selectProject: (id: string) => void;
+  refreshCurrentProject: () => Promise<void>;
+  flushAndRefresh: () => Promise<void>;
   updateProjectField: (field: keyof Project, value: any) => void;
   saveCurrentProject: () => void;
   setFocusedBlockId: (id: string | null) => void;
@@ -81,47 +199,79 @@ interface Store {
   moveBlockFamily: (fromId: string, toId: string, position: 'before' | 'after', newIndentLevel?: 0 | 1 | 2) => void;
 }
 
-function saveToStorage(projects: Project[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
-  } catch (e) {
-    console.error('Failed to save projects:', e);
-  }
+// ---------------------------------------------------------------------------
+// Migration
+// ---------------------------------------------------------------------------
+function migrateProject(raw: any): Project {
+  const p: Project = {
+    id: raw.id,
+    name: raw.name || 'Untitled',
+    notebookName: raw.notebookName || raw.notebook_name || '',
+    notebookId: raw.notebookId ?? raw.notebook_id ?? null,
+    zoteroCollection: raw.zoteroCollection || raw.zotero_collection || '',
+    blocks: raw.blocks || [],
+    citations: raw.citations || [],
+    chatHistory: raw.chatHistory || raw.chat_history || [],
+    conversationId: raw.conversationId ?? raw.conversation_id ?? null,
+    createdAt: raw.createdAt || raw.created_at || new Date().toISOString(),
+    wordCountGoal: raw.wordCountGoal,
+    writingLog: raw.writingLog || [],
+  };
+  p.blocks = (p.blocks.length > 0 ? p.blocks : [createBlock(raw.document_html || '')]).map(b => ({
+    ...b,
+    citationIds: b.citationIds || [],
+    blockType: b.blockType || undefined,
+    blockComments: b.blockComments || [],
+    frozen: b.frozen || false,
+    indentLevel: (b.indentLevel ?? 0) as 0 | 1 | 2,
+    collapsed: b.collapsed ?? false,
+  }));
+  return p;
 }
 
-export const useStore = create<Store>((set, get) => ({
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
+export const useStore = create<Store>((set, get) => {
+  // Wire up sync engine references
+  _getState = get;
+  _setState = (partial) => set(partial as any);
+
+  return {
   projects: [],
   currentProjectId: null,
   currentProject: null,
   focusedBlockId: null,
+  projectsLoaded: false,
+  syncStatus: 'synced' as SyncStatus,
 
-  loadProjects: () => {
+  loadProjects: async () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const projects: Project[] = raw ? JSON.parse(raw) : [];
-      // Migrate legacy projects missing new fields
-      const migrated = projects.map(p => ({
-        ...p,
-        citations: p.citations || [],
-        blocks: (p.blocks || []).map(b => ({
-          ...b,
-          citationIds: b.citationIds || [],
-          blockType: b.blockType || undefined,
-          blockComments: b.blockComments || [],
-          frozen: b.frozen || false,
-          indentLevel: (b.indentLevel ?? 0) as 0 | 1 | 2,
-          collapsed: b.collapsed ?? false,
-        })),
-        writingLog: p.writingLog || [],
+      set({ syncStatus: 'saving' }); // "loading" uses saving indicator (yellow)
+      const list = await apiGet<any[]>('/api/projects');
+      if (list.length === 0) {
+        set({ projects: [], currentProjectId: null, currentProject: null, projectsLoaded: true, syncStatus: 'synced' });
+        return;
+      }
+      const first = await apiGet<any>(`/api/projects/${list[0].id}`);
+      const migratedFirst = migrateProject(first);
+      const stubs: Project[] = list.slice(1).map(item => ({
+        id: item.id,
+        name: item.name,
+        notebookName: item.notebookName || item.notebook_name || '',
+        notebookId: null,
+        zoteroCollection: '',
+        blocks: [],
+        citations: [],
+        chatHistory: [],
+        conversationId: null,
+        createdAt: item.createdAt || item.created_at || '',
       }));
-      const currentProjectId = migrated.length > 0 ? migrated[0].id : null;
-      set({
-        projects: migrated,
-        currentProjectId,
-        currentProject: currentProjectId ? migrated.find(p => p.id === currentProjectId) || null : null,
-      });
+      const projects = [migratedFirst, ...stubs];
+      set({ projects, currentProjectId: migratedFirst.id, currentProject: migratedFirst, projectsLoaded: true, syncStatus: 'synced' });
     } catch (e) {
-      set({ projects: [], currentProjectId: null, currentProject: null });
+      console.error('Failed to load projects:', e);
+      set({ projects: [], currentProjectId: null, currentProject: null, projectsLoaded: true, syncStatus: 'error' });
     }
   },
 
@@ -139,15 +289,118 @@ export const useStore = create<Store>((set, get) => ({
       createdAt: new Date().toISOString(),
     };
     const projects = [...get().projects, project];
-    saveToStorage(projects);
-    set({ projects, currentProjectId: project.id, currentProject: project });
+    set({ projects, currentProjectId: project.id, currentProject: project, syncStatus: 'saving' });
+    // Immediately persist new project (no debounce)
+    const toSave = { ...project, lastModified: new Date().toISOString() };
+    apiPut(`/api/projects/${project.id}`, toSave)
+      .then(() => set({ syncStatus: 'synced' }))
+      .catch(err => {
+        console.error('Failed to create project:', err);
+        set({ syncStatus: 'error' });
+      });
     return project;
   },
 
-  selectProject: (id) => {
-    const { projects } = get();
-    const project = projects.find(p => p.id === id) || null;
-    set({ currentProjectId: id, currentProject: project });
+  deleteProject: (id) => {
+    const { projects, currentProjectId } = get();
+    // Cancel any pending save for this project
+    markClean(id);
+    const updated = projects.filter(p => p.id !== id);
+    const newCurrentId = currentProjectId === id
+      ? (updated.length > 0 ? updated[0].id : null)
+      : currentProjectId;
+    const newCurrent = newCurrentId ? updated.find(p => p.id === newCurrentId) || null : null;
+    set({ projects: updated, currentProjectId: newCurrentId, currentProject: newCurrent, syncStatus: 'saving' });
+    apiDelete(`/api/projects/${id}`)
+      .then(() => set({ syncStatus: 'synced' }))
+      .catch(err => {
+        console.error('Failed to delete project:', err);
+        set({ syncStatus: 'error' });
+      });
+  },
+
+  selectProject: async (id) => {
+    const { projects, currentProjectId } = get();
+    
+    // STEP 1: Flush any pending saves for the CURRENT project first
+    if (currentProjectId && isDirty(currentProjectId)) {
+      await flushSave();
+    }
+    
+    // STEP 2: Fetch fresh from server
+    set({ syncStatus: 'saving' }); // yellow while loading
+    try {
+      const full = await apiGet<any>(`/api/projects/${id}`);
+      const migrated = migrateProject(full);
+      const updated = projects.map(p => p.id === id ? migrated : p);
+      set({ projects: updated, currentProjectId: id, currentProject: migrated, syncStatus: 'synced' });
+    } catch {
+      // Fallback to in-memory version
+      const project = projects.find(p => p.id === id) || null;
+      set({ currentProjectId: id, currentProject: project, syncStatus: 'error' });
+    }
+  },
+
+  // Called on tab visibility change — flush first, then refresh
+  refreshCurrentProject: async () => {
+    const { currentProjectId, projects } = get();
+    if (!currentProjectId) return;
+    
+    // STEP 1: If there are dirty local edits, flush them to server FIRST
+    if (isDirty(currentProjectId)) {
+      await flushSave();
+      // After flush, local is the most recent — no need to pull from server
+      // (server now has our latest version)
+      return;
+    }
+    
+    // STEP 2: Only refresh from server if local is clean
+    if (saveInFlight) return; // wait for in-flight save to complete
+    
+    set({ syncStatus: 'saving' }); // yellow while fetching
+    try {
+      const list = await apiGet<any[]>('/api/projects');
+      const full = await apiGet<any>(`/api/projects/${currentProjectId}`);
+      const migrated = migrateProject(full);
+      
+      // Double-check: if edits happened while we were fetching, DON'T overwrite
+      if (isDirty(currentProjectId)) {
+        set({ syncStatus: 'pending' });
+        scheduleSave();
+        return;
+      }
+      
+      const freshStubs: Project[] = list
+        .filter(item => item.id !== currentProjectId)
+        .map(item => {
+          const existing = projects.find(p => p.id === item.id);
+          return existing && existing.blocks.length > 0
+            ? { ...existing, name: item.name }
+            : {
+                id: item.id,
+                name: item.name,
+                notebookName: item.notebookName || item.notebook_name || '',
+                notebookId: null,
+                zoteroCollection: '',
+                blocks: [],
+                citations: [],
+                chatHistory: [],
+                conversationId: null,
+                createdAt: item.createdAt || item.created_at || '',
+              };
+        });
+      const updated = [migrated, ...freshStubs];
+      set({ projects: updated, currentProject: migrated, syncStatus: 'synced' });
+    } catch (e) {
+      console.error('Failed to refresh project:', e);
+      set({ syncStatus: 'error' });
+    }
+  },
+
+  // Flush pending saves then refresh — used by visibility change handler
+  flushAndRefresh: async () => {
+    await flushSave();
+    await get().refreshCurrentProject();
   },
 
   updateProjectField: (field, value) => {
@@ -157,13 +410,16 @@ export const useStore = create<Store>((set, get) => ({
       p.id === currentProjectId ? { ...p, [field]: value } : p
     );
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   saveCurrentProject: () => {
-    const { projects } = get();
-    saveToStorage(projects);
+    const { currentProject } = get();
+    if (currentProject) {
+      markDirty(currentProject.id);
+      flushSave();
+    }
   },
 
   setFocusedBlockId: (id) => {
@@ -177,20 +433,18 @@ export const useStore = create<Store>((set, get) => ({
       p.id === currentProjectId ? { ...p, blocks } : p
     );
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   addBlock: (html = '', afterId, indentLevel = 0) => {
     const { projects, currentProjectId } = get();
     if (!currentProjectId) {
-      const block = createBlock(html, 'paragraph', indentLevel);
-      return block;
+      return createBlock(html, 'paragraph', indentLevel);
     }
     const project = projects.find(p => p.id === currentProjectId);
     if (!project) {
-      const block = createBlock(html, 'paragraph', indentLevel);
-      return block;
+      return createBlock(html, 'paragraph', indentLevel);
     }
     const block = createBlock(html, 'paragraph', indentLevel);
     let blocks: Block[];
@@ -205,8 +459,8 @@ export const useStore = create<Store>((set, get) => ({
       p.id === currentProjectId ? { ...p, blocks } : p
     );
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
     return block;
   },
 
@@ -224,8 +478,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   deleteBlock: (id) => {
@@ -237,8 +491,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks: blocks.length > 0 ? blocks : [createBlock('')] };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   moveBlock: (fromId, toId, position) => {
@@ -257,8 +511,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   addBlockVersion: (id, html, instruction) => {
@@ -269,14 +523,14 @@ export const useStore = create<Store>((set, get) => ({
       const blocks = p.blocks.map(b => {
         if (b.id !== id) return b;
         const newVersion = { html, ts: Date.now(), instruction };
-        const versions = [...b.versions, newVersion].slice(-5); // keep last 5
+        const versions = [...b.versions, newVersion].slice(-5);
         return { ...b, versions, activeVersion: versions.length - 1 };
       });
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   switchBlockVersion: (id, versionIndex) => {
@@ -291,8 +545,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   deleteBlockVersion: (id, versionIndex) => {
@@ -302,7 +556,7 @@ export const useStore = create<Store>((set, get) => ({
       if (p.id !== currentProjectId) return p;
       const blocks = p.blocks.map(b => {
         if (b.id !== id) return b;
-        if (b.versions.length <= 1) return b; // can't delete the only version
+        if (b.versions.length <= 1) return b;
         const versions = b.versions.filter((_, i) => i !== versionIndex);
         let activeVersion = b.activeVersion;
         if (activeVersion >= versions.length) activeVersion = versions.length - 1;
@@ -312,8 +566,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   mergeBlocks: (blockIds) => {
@@ -321,19 +575,16 @@ export const useStore = create<Store>((set, get) => ({
     if (!currentProjectId || blockIds.length < 2) return;
     const updated = projects.map(p => {
       if (p.id !== currentProjectId) return p;
-      // Determine document order by filtering p.blocks
       const orderedIds = p.blocks.map(b => b.id).filter(id => blockIds.includes(id));
       if (orderedIds.length < 2) return p;
       const [firstId, ...restIds] = orderedIds;
       const firstBlock = p.blocks.find(b => b.id === firstId)!;
       const restBlocks = restIds.map(id => p.blocks.find(b => b.id === id)!).filter(Boolean);
-      // Merge HTML with <br><br> separator
       const allHtmlParts = [
         firstBlock.versions[firstBlock.activeVersion]?.html || '',
         ...restBlocks.map(b => b.versions[b.activeVersion]?.html || ''),
       ];
       const mergedHtml = allHtmlParts.filter(h => h.trim()).join('<br><br>');
-      // Union citationIds preserving order
       const seenCids = new Set<string>();
       const mergedCitationIds: string[] = [];
       for (const b of [firstBlock, ...restBlocks]) {
@@ -344,12 +595,10 @@ export const useStore = create<Store>((set, get) => ({
           }
         }
       }
-      // Save per-segment citation mapping for disassemble
       const segmentCitations: string[][] = [
         [...(firstBlock.citationIds || [])],
         ...restBlocks.map(b => [...(b.citationIds || [])]),
       ];
-      // Build new block (first block with new version)
       const newVersion = { html: mergedHtml, ts: Date.now(), instruction: 'Merged' };
       const newVersions = [...firstBlock.versions, newVersion].slice(-5);
       const mergedBlock: Block = {
@@ -366,8 +615,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   splitBlock: (blockId, liveHtml) => {
@@ -379,14 +628,10 @@ export const useStore = create<Store>((set, get) => ({
       if (blockIdx === -1) return p;
       const block = p.blocks[blockIdx];
       const html = liveHtml !== undefined ? liveHtml : (block.versions[block.activeVersion]?.html || '');
-      // Split on <br><br> boundaries
       const segments = html.split(/<br\s*\/?>\s*<br\s*\/?>/gi).map(s => s.trim()).filter(s => s.length > 0);
-      if (segments.length <= 1) return p; // nothing to split
-      // Use per-segment citation mapping if available (from merge), else empty
+      if (segments.length <= 1) return p;
       const segCitations = block.mergeSegmentCitations;
       const hasSegCitations = segCitations && segCitations.length === segments.length;
-
-      // First segment replaces original block
       const firstHtml = segments[0];
       const newVersion = { html: firstHtml, ts: Date.now(), instruction: 'Split' };
       const newVersions = [...block.versions, newVersion].slice(-5);
@@ -397,7 +642,6 @@ export const useStore = create<Store>((set, get) => ({
         citationIds: hasSegCitations ? segCitations[0] : (block.citationIds || []),
         mergeSegmentCitations: undefined,
       };
-      // Remaining segments become new blocks
       const newBlocks: Block[] = segments.slice(1).map((seg, i) => ({
         id: generateId(),
         type: block.type,
@@ -410,8 +654,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   addCitationToBlock: (blockId, zoteroKey, data) => {
@@ -420,7 +664,6 @@ export const useStore = create<Store>((set, get) => ({
     const project = projects.find(p => p.id === currentProjectId);
     if (!project) return { duplicate: false, citationId: '' };
 
-    // Duplicate detection: check by zoteroKey OR DOI
     const existingByKey = project.citations.find(c => c.zoteroKey === zoteroKey);
     const existingByDoi = data.DOI
       ? project.citations.find(c => c.data.DOI && c.data.DOI === data.DOI && c.zoteroKey !== zoteroKey)
@@ -446,8 +689,8 @@ export const useStore = create<Store>((set, get) => ({
       p.id === currentProjectId ? { ...p, citations, blocks } : p
     );
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
     return { duplicate: isDuplicate, citationId: citId };
   },
 
@@ -462,8 +705,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, citations };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   removeCitationFromBlock: (blockId, citationId) => {
@@ -478,8 +721,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   setChatHistory: (history) => {
@@ -489,8 +732,8 @@ export const useStore = create<Store>((set, get) => ({
       p.id === currentProjectId ? { ...p, chatHistory: history } : p
     );
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   addChatMessage: (msg) => {
@@ -502,8 +745,8 @@ export const useStore = create<Store>((set, get) => ({
         : p
     );
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   setConversationId: (id) => {
@@ -513,8 +756,8 @@ export const useStore = create<Store>((set, get) => ({
       p.id === currentProjectId ? { ...p, conversationId: id } : p
     );
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   setWordCountGoal: (goal) => {
@@ -530,8 +773,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   addBlockComment: (blockId, text) => {
@@ -547,8 +790,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   deleteBlockComment: (blockId, commentId) => {
@@ -563,8 +806,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   updateWritingLog: (date, words) => {
@@ -579,13 +822,12 @@ export const useStore = create<Store>((set, get) => ({
       } else {
         log.push({ date, words });
       }
-      // Keep last 30 days
       log.sort((a, b) => a.date.localeCompare(b.date));
       return { ...p, writingLog: log.slice(-30) };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   toggleBlockFrozen: (blockId) => {
@@ -597,8 +839,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   setBlockIndent: (blockId, level) => {
@@ -610,8 +852,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   toggleBlockCollapsed: (blockId) => {
@@ -623,8 +865,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   setBlocksCollapsedAll: (collapsed) => {
@@ -636,8 +878,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
 
   moveBlockFamily: (fromId, toId, position, newIndentLevel) => {
@@ -650,17 +892,14 @@ export const useStore = create<Store>((set, get) => ({
       if (fromIdx === -1) return p;
       const fromLevel = blocks[fromIdx].indentLevel ?? 0;
 
-      // Compute the family: fromBlock + all immediate descendants
       const familyIndices: number[] = [fromIdx];
       for (let i = fromIdx + 1; i < blocks.length; i++) {
         if ((blocks[i].indentLevel ?? 0) <= fromLevel) break;
         familyIndices.push(i);
       }
 
-      // Extract family blocks (in order)
       const family = familyIndices.map(i => blocks[i]);
 
-      // If newIndentLevel is specified, adjust all family blocks by the delta
       let adjustedFamily = family;
       if (newIndentLevel !== undefined) {
         const delta = newIndentLevel - fromLevel;
@@ -672,11 +911,9 @@ export const useStore = create<Store>((set, get) => ({
         }));
       }
 
-      // Remove family from current position (highest indices first)
       const sortedIndices = [...familyIndices].sort((a, b) => b - a);
       sortedIndices.forEach(i => blocks.splice(i, 1));
 
-      // Find toId in updated blocks array
       const toIdx = blocks.findIndex(b => b.id === toId);
       if (toIdx === -1) return p;
       const insertIdx = position === 'after' ? toIdx + 1 : toIdx;
@@ -684,7 +921,8 @@ export const useStore = create<Store>((set, get) => ({
       return { ...p, blocks };
     });
     const currentProject = updated.find(p => p.id === currentProjectId) || null;
-    saveToStorage(updated);
     set({ projects: updated, currentProject });
+    if (currentProject) onMutation(currentProject);
   },
-}));
+};
+});

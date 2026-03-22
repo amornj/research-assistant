@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '@/store/useStore';
 import TopBar from './TopBar';
 import NotebookPane from './NotebookPane';
@@ -39,9 +39,6 @@ export default function MainApp() {
   const [panesAutoHidden, setPanesAutoHidden] = useState(false);
 
   const [isDragging, setIsDragging] = useState(false);
-  const [pullY, setPullY] = useState(0);
-  const touchStartYRef = useRef(0);
-  const PULL_THRESHOLD = 64;
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingH = useRef(false);
   const isDraggingSplit = useRef(false);
@@ -367,33 +364,6 @@ export default function MainApp() {
     }
   };
 
-  const onTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
-    touchStartYRef.current = e.touches[0].clientY;
-  }, []);
-
-  const onTouchEnd = useCallback(() => {
-    if (pullY >= PULL_THRESHOLD) {
-      useStore.getState().saveCurrentProject();
-    }
-    setPullY(0);
-    touchStartYRef.current = 0;
-  }, [pullY]);
-
-  useEffect(() => {
-    const el = document.getElementById('main-app-root');
-    if (!el) return;
-    const handleTouchMove = (e: TouchEvent) => {
-      if (!touchStartYRef.current) return;
-      const delta = e.touches[0].clientY - touchStartYRef.current;
-      if (delta > 10) {
-        e.preventDefault();
-        setPullY(Math.min(delta, PULL_THRESHOLD * 1.5));
-      }
-    };
-    el.addEventListener('touchmove', handleTouchMove, { passive: false });
-    return () => el.removeEventListener('touchmove', handleTouchMove);
-  }, []);
-
   const renderPaneContent = (pane: PaneState) => {
     if (pane.mode === 'pdf' && pane.pdfUrl) {
       return <PdfViewer url={pane.pdfUrl} filename={pane.pdfFilename} disablePointerEvents={isDragging} />;
@@ -416,25 +386,7 @@ export default function MainApp() {
     }`;
 
   return (
-    <div
-      id="main-app-root"
-      className="flex flex-col h-screen"
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
-    >
-      {/* Pull-to-refresh indicator */}
-      {pullY > 0 && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
-          height: `${Math.min(pullY, PULL_THRESHOLD)}px`,
-          display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-          paddingBottom: '6px',
-          background: 'linear-gradient(to bottom, #1a1d27, transparent)',
-          color: '#6c8aff', fontSize: '12px', pointerEvents: 'none',
-        }}>
-          {pullY >= PULL_THRESHOLD ? '↑ Release to sync' : '↓ Pull to sync'}
-        </div>
-      )}
+    <div className="flex flex-col h-screen">
       {/* Hidden file inputs for PDF loading */}
       <input
         ref={leftPdfInputRef}

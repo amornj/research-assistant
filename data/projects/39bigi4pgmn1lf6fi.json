@@ -1,0 +1,32 @@
+{
+  "id": "39bigi4pgmn1lf6fi",
+  "name": "test from local",
+  "notebookName": "",
+  "notebookId": null,
+  "zoteroCollection": "",
+  "blocks": [
+    {
+      "id": "peegm8424mn1lf6fi",
+      "type": "paragraph",
+      "versions": [
+        {
+          "html": "this is note from local that great 1234 5678",
+          "ts": 1774174050126,
+          "instruction": null
+        }
+      ],
+      "activeVersion": 0,
+      "citationIds": [],
+      "indentLevel": 0,
+      "collapsed": false,
+      "blockComments": [],
+      "frozen": false
+    }
+  ],
+  "citations": [],
+  "chatHistory": [],
+  "conversationId": null,
+  "createdAt": "2026-03-22T10:07:30.126Z",
+  "writingLog": [],
+  "lastModified": "2026-03-22T10:28:13.022Z"
+}

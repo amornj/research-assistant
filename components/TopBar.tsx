@@ -460,28 +460,34 @@ ${body}
             </div>
           )}
         </div>
-        {/* Sync status — always tappable as force-sync */}
+        {/* Sync button — always clickable to force sync */}
         <button
-          className="flex-shrink-0 flex items-center gap-1 text-xs bg-transparent border-0 p-0 cursor-pointer group"
-          title="Tap to force sync"
-          onClick={() => useStore.getState().saveCurrentProject()}
+          className="flex-shrink-0 flex items-center gap-1 text-xs px-2 py-1 rounded hover:bg-[#232733] transition-colors"
+          title={
+            syncStatus === 'synced' ? 'Synced — tap to refresh' :
+            syncStatus === 'pending' ? 'Unsaved — tap to sync now' :
+            syncStatus === 'saving' ? 'Syncing…' :
+            'Sync error — tap to retry'
+          }
+          disabled={syncStatus === 'saving'}
+          onClick={() => useStore.getState().flushAndRefresh()}
         >
-          <span className={`inline-block w-2.5 h-2.5 rounded-full ${
+          <span className={`inline-block w-2.5 h-2.5 rounded-full transition-colors ${
             syncStatus === 'synced' ? 'bg-emerald-400' :
             syncStatus === 'pending' ? 'bg-amber-400' :
             syncStatus === 'saving' ? 'bg-amber-400 animate-pulse' :
             'bg-red-400'
           }`} />
-          <span className={`hidden sm:inline ${
-            syncStatus === 'synced' ? 'text-emerald-400/70 group-hover:text-emerald-400' :
-            syncStatus === 'pending' ? 'text-amber-400/70 group-hover:text-amber-400' :
+          <span className={`${
+            syncStatus === 'synced' ? 'text-emerald-400/70' :
+            syncStatus === 'pending' ? 'text-amber-400/70' :
             syncStatus === 'saving' ? 'text-amber-400/70' :
-            'text-red-400/70 group-hover:text-red-400'
+            'text-red-400/70'
           }`}>
-            {syncStatus === 'synced' ? 'Synced' :
-             syncStatus === 'pending' ? 'Unsaved' :
-             syncStatus === 'saving' ? 'Syncing…' :
-             'Error'}
+            {syncStatus === 'synced' ? '↻' :
+             syncStatus === 'pending' ? '↑' :
+             syncStatus === 'saving' ? '⟳' :
+             '⚠'}
           </span>
         </button>
 

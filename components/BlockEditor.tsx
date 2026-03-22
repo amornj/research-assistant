@@ -506,8 +506,13 @@ function BlockItem({
     if (!contentRef.current) return;
     const versionChanged = prevActiveVersion.current !== block.activeVersion;
     const blockChanged = prevBlockId.current !== block.id;
-    if (versionChanged || blockChanged) {
-      contentRef.current.innerHTML = activeHtml;
+    // Also update if server-side content changed (e.g. cross-device sync refresh)
+    const contentChanged = contentRef.current.innerHTML !== activeHtml;
+    if (versionChanged || blockChanged || contentChanged) {
+      // Only update innerHTML if the block isn't currently being edited (has focus)
+      if (document.activeElement !== contentRef.current || blockChanged || versionChanged) {
+        contentRef.current.innerHTML = activeHtml;
+      }
       prevActiveVersion.current = block.activeVersion;
       prevBlockId.current = block.id;
     }
