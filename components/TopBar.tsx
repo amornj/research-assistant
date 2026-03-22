@@ -64,8 +64,9 @@ function WritingSparkline({ log }: { log: { date: string; words: number }[] }) {
 }
 
 export default function TopBar({ onNewProject, theme, onThemeChange }: TopBarProps) {
-  const { projects, currentProjectId, selectProject, setWordCountGoal, updateWritingLog, updateProjectField } = useStore();
+  const { projects, currentProjectId, selectProject, deleteProject, setWordCountGoal, updateWritingLog, updateProjectField } = useStore();
   const currentProject = useStore(s => s.currentProject);
+  const syncStatus = useStore(s => s.syncStatus);
   const [showExport, setShowExport] = useState(false);
   const [citationStyle, setCitationStyle] = useState<CitationStyle>('vancouver');
   const [showGoalInput, setShowGoalInput] = useState(false);
@@ -428,21 +429,62 @@ ${body}
           {showProjectDropdown && (
             <div className="absolute left-0 top-full mt-1 bg-[#1a1d27] border border-[#2d3140] rounded shadow-xl z-50 min-w-[180px] py-1 max-h-[300px] overflow-y-auto">
               {projects.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => { selectProject(p.id); setShowProjectDropdown(false); }}
-                  className={`w-full text-left px-3 py-1.5 text-sm transition-colors truncate ${
-                    p.id === currentProjectId
-                      ? 'text-[#6c8aff] bg-[#6c8aff]/10'
-                      : 'text-[#c8ccd8] hover:bg-[#2d3140] hover:text-[#e1e4ed]'
-                  }`}
-                >
-                  {p.name}
-                </button>
+                <div key={p.id} className="flex items-center group">
+                  <button
+                    onClick={() => { selectProject(p.id); setShowProjectDropdown(false); }}
+                    className={`flex-1 text-left px-3 py-1.5 text-sm transition-colors truncate ${
+                      p.id === currentProjectId
+                        ? 'text-[#6c8aff] bg-[#6c8aff]/10'
+                        : 'text-[#c8ccd8] hover:bg-[#2d3140] hover:text-[#e1e4ed]'
+                    }`}
+                  >
+                    {p.name}
+                  </button>
+                  {projects.length > 1 && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(`Delete "${p.name}"? This cannot be undone.`)) {
+                          deleteProject(p.id);
+                          if (projects.length <= 1) setShowProjectDropdown(false);
+                        }
+                      }}
+                      className="px-2 py-1 text-[#8b90a0] hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all text-xs flex-shrink-0"
+                      title="Delete project"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           )}
         </div>
+        {/* Sync status — always tappable as force-sync */}
+        <button
+          className="flex-shrink-0 flex items-center gap-1 text-xs bg-transparent border-0 p-0 cursor-pointer group"
+          title="Tap to force sync"
+          onClick={() => useStore.getState().saveCurrentProject()}
+        >
+          <span className={`inline-block w-2.5 h-2.5 rounded-full ${
+            syncStatus === 'synced' ? 'bg-emerald-400' :
+            syncStatus === 'pending' ? 'bg-amber-400' :
+            syncStatus === 'saving' ? 'bg-amber-400 animate-pulse' :
+            'bg-red-400'
+          }`} />
+          <span className={`hidden sm:inline ${
+            syncStatus === 'synced' ? 'text-emerald-400/70 group-hover:text-emerald-400' :
+            syncStatus === 'pending' ? 'text-amber-400/70 group-hover:text-amber-400' :
+            syncStatus === 'saving' ? 'text-amber-400/70' :
+            'text-red-400/70 group-hover:text-red-400'
+          }`}>
+            {syncStatus === 'synced' ? 'Synced' :
+             syncStatus === 'pending' ? 'Unsaved' :
+             syncStatus === 'saving' ? 'Syncing…' :
+             'Error'}
+          </span>
+        </button>
+
         <button onClick={onNewProject} className="px-3 py-1 bg-[#6c8aff] hover:bg-[#5a78f0] text-white text-sm rounded transition-colors flex-shrink-0">
           + New
         </button>

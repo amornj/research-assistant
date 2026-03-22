@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useStore } from '@/store/useStore';
 import TopBar from './TopBar';
 import NotebookPane from './NotebookPane';
@@ -21,7 +21,7 @@ interface PaneState {
 }
 
 export default function MainApp() {
-  const { loadProjects, currentProject } = useStore();
+  const { loadProjects, currentProject, projectsLoaded, flushAndRefresh, saveCurrentProject } = useStore();
   const [showNewProject, setShowNewProject] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [leftWidth, setLeftWidth] = useState(320);
@@ -38,6 +38,10 @@ export default function MainApp() {
   // Auto-hide panes state (separate from manual collapse)
   const [panesAutoHidden, setPanesAutoHidden] = useState(false);
 
+  const [isDragging, setIsDragging] = useState(false);
+  const [pullY, setPullY] = useState(0);
+  const touchStartYRef = useRef(0);
+  const PULL_THRESHOLD = 64;
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingH = useRef(false);
   const isDraggingSplit = useRef(false);
@@ -47,6 +51,35 @@ export default function MainApp() {
 
   useEffect(() => {
     loadProjects();
+  }, []);
+
+  // Sync on tab visibility change:
+  // - Tab hidden (user switching away): flush pending saves immediately
+  // - Tab visible (user coming back): flush then refresh from server
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        flushAndRefresh();
+      } else {
+        // Flush immediately when leaving — critical on iPhone where Safari kills tabs
+        saveCurrentProject();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // Also flush on page unload (closing tab, navigating away)
+    const handleBeforeUnload = () => {
+      saveCurrentProject();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    // iOS Safari: pagehide fires more reliably than beforeunload
+    window.addEventListener('pagehide', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handleBeforeUnload);
+    };
   }, []);
 
   // Load persisted theme on client mount (separate from the apply effect to avoid SSR mismatch)
@@ -97,11 +130,10 @@ export default function MainApp() {
   }, [theme]);
 
   useEffect(() => {
-    const store = useStore.getState();
-    if (!store.currentProject && store.projects.length === 0) {
+    if (projectsLoaded && !currentProject) {
       setShowNewProject(true);
     }
-  }, []);
+  }, [projectsLoaded, currentProject]);
 
   // #13 — Global Cmd+K listener
   useEffect(() => {
@@ -249,6 +281,7 @@ export default function MainApp() {
   const handleVerticalDrag = (e: React.MouseEvent) => {
     e.preventDefault();
     isDraggingH.current = true;
+    setIsDragging(true);
     const startX = e.clientX;
     const startWidth = leftWidth;
     const onMove = (me: MouseEvent) => {
@@ -258,6 +291,7 @@ export default function MainApp() {
     };
     const onUp = () => {
       isDraggingH.current = false;
+      setIsDragging(false);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -268,6 +302,7 @@ export default function MainApp() {
   const handleSplitDrag = (e: React.MouseEvent) => {
     e.preventDefault();
     isDraggingSplit.current = true;
+    setIsDragging(true);
     const startX = e.clientX;
     const startWidth = splitEditorWidth;
     const onMove = (me: MouseEvent) => {
@@ -277,6 +312,7 @@ export default function MainApp() {
     };
     const onUp = () => {
       isDraggingSplit.current = false;
+      setIsDragging(false);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -331,9 +367,36 @@ export default function MainApp() {
     }
   };
 
+  const onTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    touchStartYRef.current = e.touches[0].clientY;
+  }, []);
+
+  const onTouchEnd = useCallback(() => {
+    if (pullY >= PULL_THRESHOLD) {
+      useStore.getState().saveCurrentProject();
+    }
+    setPullY(0);
+    touchStartYRef.current = 0;
+  }, [pullY]);
+
+  useEffect(() => {
+    const el = document.getElementById('main-app-root');
+    if (!el) return;
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!touchStartYRef.current) return;
+      const delta = e.touches[0].clientY - touchStartYRef.current;
+      if (delta > 10) {
+        e.preventDefault();
+        setPullY(Math.min(delta, PULL_THRESHOLD * 1.5));
+      }
+    };
+    el.addEventListener('touchmove', handleTouchMove, { passive: false });
+    return () => el.removeEventListener('touchmove', handleTouchMove);
+  }, []);
+
   const renderPaneContent = (pane: PaneState) => {
     if (pane.mode === 'pdf' && pane.pdfUrl) {
-      return <PdfViewer url={pane.pdfUrl} filename={pane.pdfFilename} />;
+      return <PdfViewer url={pane.pdfUrl} filename={pane.pdfFilename} disablePointerEvents={isDragging} />;
     }
     if (pane.mode === 'zotero') {
       return (
@@ -353,7 +416,25 @@ export default function MainApp() {
     }`;
 
   return (
-    <div className="flex flex-col h-screen">
+    <div
+      id="main-app-root"
+      className="flex flex-col h-screen"
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+    >
+      {/* Pull-to-refresh indicator */}
+      {pullY > 0 && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
+          height: `${Math.min(pullY, PULL_THRESHOLD)}px`,
+          display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+          paddingBottom: '6px',
+          background: 'linear-gradient(to bottom, #1a1d27, transparent)',
+          color: '#6c8aff', fontSize: '12px', pointerEvents: 'none',
+        }}>
+          {pullY >= PULL_THRESHOLD ? '↑ Release to sync' : '↓ Pull to sync'}
+        </div>
+      )}
       {/* Hidden file inputs for PDF loading */}
       <input
         ref={leftPdfInputRef}
